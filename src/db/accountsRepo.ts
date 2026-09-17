@@ -1,0 +1,90 @@
+import { getDb } from './client';
+import { createId, nowIso } from '../domain/id';
+import type { Account, AccountType, BankId } from '../domain/types';
+
+export interface CreateAccountInput {
+  name: string;
+  bank: BankId;
+  accountType: AccountType;
+  currency: string;
+  valuationBased: boolean;
+  manualRateToGbp?: number | null;
+}
+
+export async function createAccount(input: CreateAccountInput): Promise<Account> {
+  const account: Account = {
+    id: createId(),
+    name: input.name,
+    bank: input.bank,
+    accountType: input.accountType,
+    currency: input.currency,
+    valuationBased: input.valuationBased,
+    manualRateToGbp: input.manualRateToGbp ?? null,
+    createdAt: nowIso(),
+    archived: false,
+  };
+  const db = await getDb();
+  await db.put('accounts', account);
+  return account;
+}
+
+export async function updateAccount(account: Account): Promise<void> {
+  const db = await getDb();
+  await db.put('accounts', account);
+}
+
+export async function archiveAccount(accountId: string): Promise<void> {
+  const db = await getDb();
+  const account = await db.get('accounts', accountId);
+  if (!account) return;
+  account.archived = true;
+  await db.put('accounts', account);
+}
+
+export async function deleteAccountCascade(accountId: string): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(
+    ['accounts', 'statementImports', 'transactions', 'transfers', 'valuationSnapshots'],
+    'readwrite',
+  );
+
+  const transactions = await tx.objectStore('transactions').index('by-account').getAll(accountId);
+  const transactionIds = new Set(transactions.map((t) => t.id));
+
+  const allTransfers = await tx.objectStore('transfers').getAll();
+  for (const transfer of allTransfers) {
+    if (
+      transactionIds.has(transfer.outgoingTransactionId) ||
+      transactionIds.has(transfer.incomingTransactionId)
+    ) {
+      await tx.objectStore('transfers').delete(transfer.id);
+    }
+  }
+
+  for (const transaction of transactions) {
+    await tx.objectStore('transactions').delete(transaction.id);
+  }
+
+  const imports = await tx.objectStore('statementImports').index('by-account').getAllKeys(accountId);
+  for (const importId of imports) {
+    await tx.objectStore('statementImports').delete(importId);
+  }
+
+  const snapshots = await tx.objectStore('valuationSnapshots').index('by-account').getAllKeys(accountId);
+  for (const snapshotId of snapshots) {
+    await tx.objectStore('valuationSnapshots').delete(snapshotId);
+  }
+
+  await tx.objectStore('accounts').delete(accountId);
+  await tx.done;
+}
+
+export async function listAccounts(): Promise<Account[]> {
+  const db = await getDb();
+  return db.getAll('accounts');
+}
+
+export async function getAccount(accountId: string): Promise<Account | undefined> {
+  const db = await getDb();
+  return db.get('accounts', accountId);
+}
