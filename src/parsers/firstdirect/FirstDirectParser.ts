@@ -6,8 +6,12 @@ import type { TextLine } from '../pdfText';
 /**
  * NOTE: header labels and date format below are a best-effort guess at First
  * Direct's typical statement layout (Date | Description | Paid out | Paid in
- * | Balance). Verify against a real (redacted) First Direct statement PDF
- * and adjust HEADER_CONFIG / DATE_FORMAT as needed.
+ * | Balance), based on HsbcParser.ts, which was verified against a real HSBC
+ * Premier statement — First Direct is part of HSBC Group and likely shares
+ * the same statement generator/layout (date printed once per day, multi-line
+ * transactions, "D" suffix for a debit/overdrawn balance), but this hasn't
+ * been confirmed against a real First Direct statement PDF yet. If it
+ * doesn't parse correctly, compare against HsbcParser.ts first.
  */
 const HEADER_CONFIG = {
   date: ['date'],
@@ -37,7 +41,7 @@ export const FirstDirectParser: BankParser = {
     const { transactions, warnings } = parseTableRows(pages, header, {
       dateFormat: DATE_FORMAT,
       defaultCurrency: 'GBP',
-    });
+    }, HEADER_CONFIG);
 
     const { start, end } = periodFromTransactions(transactions);
     return { transactions, statementPeriodStart: start, statementPeriodEnd: end, warnings };

@@ -4,10 +4,13 @@ import { findHeaderColumns, parseTableRows, periodFromTransactions } from '../ta
 import type { TextLine } from '../pdfText';
 
 /**
- * NOTE: header labels and date format below are a best-effort guess at
- * HSBC's typical statement layout (Date | Type | Description | Paid out |
- * Paid in | Balance). Verify against a real (redacted) HSBC statement PDF
- * and adjust HEADER_CONFIG / DATE_FORMAT as needed.
+ * Verified against a real HSBC Premier statement PDF. Its table repeats a
+ * "Date | Payment type and details | Paid out | Paid in | Balance" header on
+ * every page (with justification spacing sometimes baked into the header
+ * text itself), only prints the date once per day, each transaction can
+ * span multiple lines (description first, amount/balance on a later line —
+ * see parseRowsFromColumns in tableParsing.ts), and marks a debit/overdrawn
+ * balance with a trailing "D" rather than "DR".
  */
 const HEADER_CONFIG = {
   date: ['date'],
@@ -35,7 +38,7 @@ export const HsbcParser: BankParser = {
     const { transactions, warnings } = parseTableRows(pages, header, {
       dateFormat: DATE_FORMAT,
       defaultCurrency: 'GBP',
-    });
+    }, HEADER_CONFIG);
 
     const { start, end } = periodFromTransactions(transactions);
     return { transactions, statementPeriodStart: start, statementPeriodEnd: end, warnings };

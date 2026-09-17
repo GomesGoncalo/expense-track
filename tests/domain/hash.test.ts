@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { computeDedupeHash, computeTextHash } from '../../src/domain/hash';
 
 describe('computeDedupeHash', () => {
@@ -30,5 +30,29 @@ describe('computeTextHash', () => {
     const c = await computeTextHash('different contents');
     expect(a).toBe(b);
     expect(a).not.toBe(c);
+  });
+});
+
+describe('hashing without crypto.subtle', () => {
+  // Simulates Safari/WebKit in a non-secure context (e.g. testing over plain
+  // HTTP on a local network), where crypto.subtle doesn't exist.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('falls back to a deterministic non-crypto hash for dedupe hashes', async () => {
+    vi.stubGlobal('crypto', { ...crypto, subtle: undefined });
+    const a = await computeDedupeHash('acc1', '2026-01-05', 'TESCO STORES', -1234);
+    const b = await computeDedupeHash('acc1', '2026-01-05', 'TESCO STORES', -1234);
+    const c = await computeDedupeHash('acc1', '2026-01-05', 'SAINSBURYS', -1234);
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
+  });
+
+  it('falls back to a deterministic non-crypto hash for text hashes', async () => {
+    vi.stubGlobal('crypto', { ...crypto, subtle: undefined });
+    const a = await computeTextHash('statement contents');
+    const b = await computeTextHash('statement contents');
+    expect(a).toBe(b);
   });
 });

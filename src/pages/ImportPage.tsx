@@ -23,7 +23,11 @@ export function ImportPage() {
   const { accounts, refresh } = useAppStore();
   const activeAccounts = accounts.filter((a) => !a.archived);
 
-  const [accountId, setAccountId] = useState<string>(activeAccounts[0]?.id ?? '');
+  // Not initialized from activeAccounts[0] directly: accounts load asynchronously
+  // from IndexedDB after mount, so that value would often still be empty here.
+  // Falling back below (effectiveAccountId) keeps the first account selected
+  // by default without needing an effect, and still lets the user pick another.
+  const [accountId, setAccountId] = useState<string>('');
   const [file, setFile] = useState<File | null>(null);
   const [stage, setStage] = useState<Stage>('select');
   const [pages, setPages] = useState<TextLine[][]>([]);
@@ -46,7 +50,8 @@ export function ImportPage() {
   const [summary, setSummary] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const account = activeAccounts.find((a) => a.id === accountId);
+  const effectiveAccountId = accountId || (activeAccounts[0]?.id ?? '');
+  const account = activeAccounts.find((a) => a.id === effectiveAccountId);
 
   function applyParseResult(transactions: ParsedTransactionRow[], w: string[], start: string | null, end: string | null) {
     setRows(transactions.map((t) => ({ ...t, include: true })));
@@ -140,7 +145,7 @@ export function ImportPage() {
       <div className="card form-grid">
         <label>
           Account
-          <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+          <select value={effectiveAccountId} onChange={(e) => setAccountId(e.target.value)}>
             {activeAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name} ({BANK_LABELS[a.bank]})

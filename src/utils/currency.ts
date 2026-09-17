@@ -1,11 +1,16 @@
-/** Parses a display amount like "1,234.56", "-1,234.56", "£1,234.56", "1234.56 DR" into integer pence. */
+/**
+ * Parses a display amount like "1,234.56", "-1,234.56", "£1,234.56",
+ * "1234.56 DR" into integer pence. Some HSBC/First Direct statements mark a
+ * debit (overdrawn) balance with a lone trailing "D" rather than "DR" —
+ * `\bD\b` matches that but not the "D" inside "DR" (no word boundary there).
+ */
 export function parseAmountToPence(raw: string): number {
   const trimmed = raw.trim();
   const isCreditSuffix = /\bCR\b/i.test(trimmed);
-  const isDebitSuffix = /\bDR\b/i.test(trimmed);
+  const isDebitSuffix = /\bDR\b/i.test(trimmed) || /\bD\b/i.test(trimmed);
   const cleaned = trimmed
     .replace(/[£$€]/g, '')
-    .replace(/\bDR\b|\bCR\b/gi, '')
+    .replace(/\bDR\b|\bCR\b|\bD\b/gi, '')
     .replace(/,/g, '')
     .trim();
 

@@ -37,7 +37,7 @@ export const RevolutParser: BankParser = {
     const { transactions, warnings } = parseTableRows(pages, header, {
       dateFormat: DATE_FORMAT,
       defaultCurrency: 'GBP',
-    });
+    }, HEADER_CONFIG);
 
     const { start, end } = periodFromTransactions(transactions);
     return { transactions, statementPeriodStart: start, statementPeriodEnd: end, warnings };

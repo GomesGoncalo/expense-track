@@ -22,11 +22,13 @@ function AccountForm({ onCreated }: { onCreated: () => void }) {
   const [valuationBased, setValuationBased] = useState(false);
   const [manualRate, setManualRate] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
     setSubmitting(true);
+    setError(null);
     try {
       await accountsRepo.createAccount({
         name: name.trim(),
@@ -38,6 +40,8 @@ function AccountForm({ onCreated }: { onCreated: () => void }) {
       });
       setName('');
       onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create account.');
     } finally {
       setSubmitting(false);
     }
@@ -94,19 +98,26 @@ function AccountForm({ onCreated }: { onCreated: () => void }) {
       <button type="submit" disabled={submitting}>
         Add account
       </button>
+      {error && <p className="error">{error}</p>}
     </form>
   );
 }
 
 function UpdateValueDialog({ account, onClose, onSaved }: { account: Account; onClose: () => void; onSaved: () => void }) {
   const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSave() {
     if (!value.trim()) return;
-    const pence = parseAmountToPence(value);
-    await valuationSnapshotsRepo.addSnapshot(account.id, todayIsoDate(), pence, 'manual');
-    onSaved();
-    onClose();
+    setError(null);
+    try {
+      const pence = parseAmountToPence(value);
+      await valuationSnapshotsRepo.addSnapshot(account.id, todayIsoDate(), pence, 'manual');
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save value.');
+    }
   }
 
   return (
@@ -117,6 +128,7 @@ function UpdateValueDialog({ account, onClose, onSaved }: { account: Account; on
           Current value ({account.currency})
           <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="e.g. 12345.67" autoFocus />
         </label>
+        {error && <p className="error">{error}</p>}
         <div className="dialog-actions">
           <button onClick={onClose}>Cancel</button>
           <button onClick={handleSave}>Save</button>
