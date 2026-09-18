@@ -61,7 +61,7 @@ import type { Transaction, Transfer } from '../domain/types';
 import { categoryColorOrder } from '../domain/categories';
 import { exportBackup, downloadBackup, readBackupFile, importBackup } from '../db/backup';
 import { formatPence } from '../utils/currency';
-import { daysBetween, periodRange, todayIsoDate } from '../utils/dates';
+import { daysBetween, latestDate, periodRange, todayIsoDate } from '../utils/dates';
 import type { Period } from '../utils/dates';
 import { getNamedCategoryColor, useColorScheme, getCategoricalColor } from '../utils/palette';
 import { usePersistedState } from '../utils/persistedState';
@@ -199,7 +199,12 @@ export function DashboardPage() {
       }),
     [series, netWorthAccountsWithData],
   );
-  const { start, end } = periodRange(period);
+  // Anchored on the most recent transaction date, not wall-clock today —
+  // statements are imported in batches, so "this month" would otherwise
+  // silently show empty for weeks after the last import (same reasoning as
+  // reporting/insights.ts).
+  const mostRecentDate = useMemo(() => latestDate(transactions), [transactions]);
+  const { start, end } = periodRange(period, mostRecentDate ?? undefined);
   const incomeExpense = useMemo(() => computeIncomeExpenseSummary(transactions, start, end), [transactions, start, end]);
   const allCategoriesInPeriod = useMemo(() => computeSpendingByCategory(transactions, start, end), [transactions, start, end]);
   const spendingByCategory = useMemo(

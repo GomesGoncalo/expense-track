@@ -9,6 +9,7 @@ import { ParserError } from '../parsers/BankParser';
 import type { ParsedTransactionRow } from '../parsers/BankParser';
 import { detectColumnsForMapping, parseWithMapping } from '../parsers/manualMapping/ColumnMapper';
 import { commitImport } from '../import/commitImport';
+import * as statementImportsRepo from '../db/statementImportsRepo';
 import { formatPence } from '../utils/currency';
 import { ownerSummary } from '../utils/ownerSummary';
 import { Button } from '../components/ui/Button';
@@ -65,6 +66,13 @@ export function ImportPage() {
   });
   const [summary, setSummary] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Tracked separately from `stage`: applyMapping always advances stage to
+  // 'preview' on success (same as the auto-parser path), so by the time
+  // handleCommit runs, `stage === 'mapping'` is never true — checking it
+  // there would silently lose which imports actually went through manual
+  // mapping.
+  const [usedManualMapping, setUsedManualMapping] = useState(false);
+  const [duplicateImportWarning, setDuplicateImportWarning] = useState<string | null>(null);
 
   const effectiveAccountId = accountId || (activeAccounts[0]?.id ?? '');
   const account = activeAccounts.find((a) => a.id === effectiveAccountId);
@@ -86,12 +94,21 @@ export function ImportPage() {
   async function handleParse() {
     if (!file || !account) return;
     setError(null);
+    setUsedManualMapping(false);
+    setDuplicateImportWarning(null);
     setBusy(true);
     try {
       const extractedPages = await extractPdfLines(file);
       setPages(extractedPages);
       const hash = await computeTextHash(joinPageLines(extractedPages));
       setRawTextHash(hash);
+
+      const existingImport = await statementImportsRepo.findByRawTextHash(account.id, hash);
+      if (existingImport) {
+        setDuplicateImportWarning(
+          `This looks like the same file as "${existingImport.fileName}", already imported on ${existingImport.importedAt.slice(0, 10)} — duplicate transactions below will be skipped automatically, but double check before committing.`,
+        );
+      }
 
       const parser = getParserForAccount(account.bank, account.accountType);
       if (!parser.detect(joinPageLines(extractedPages), extractedPages)) {
@@ -126,8 +143,29 @@ export function ImportPage() {
 
   function applyMapping() {
     if (!account) return;
-    const result = parseWithMapping(pages, mapping, account.currency);
-    applyParseResult(result.transactions, result.warnings, null, null);
+    const maxIndex = detectedColumns.length - 1;
+    const chosenIndices = [
+      mapping.dateColumnIndex,
+      mapping.descriptionColumnIndex,
+      mapping.moneyOutColumnIndex,
+      mapping.moneyInColumnIndex,
+      mapping.singleAmountColumnIndex,
+      mapping.balanceColumnIndex,
+    ].filter((i): i is number => i !== null);
+    if (chosenIndices.some((i) => i < 0 || i > maxIndex)) {
+      show({
+        tone: 'error',
+        message: `Column index out of range — this statement only has ${detectedColumns.length} detected column(s) (0-${maxIndex}).`,
+      });
+      return;
+    }
+    try {
+      const result = parseWithMapping(pages, mapping, account.currency);
+      setUsedManualMapping(true);
+      applyParseResult(result.transactions, result.warnings, null, null);
+    } catch (err) {
+      show({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to parse with this column mapping.' });
+    }
   }
 
   function updateRow(index: number, patch: Partial<EditableRow>) {
@@ -146,7 +184,7 @@ export function ImportPage() {
         pageCount: pages.length,
         statementPeriodStart: period.start,
         statementPeriodEnd: period.end,
-        columnMappingUsed: stage === 'mapping' ? mapping : null,
+        columnMappingUsed: usedManualMapping ? mapping : null,
         rows: included,
         endingValuation,
       });
@@ -171,6 +209,8 @@ export function ImportPage() {
     setError(null);
     setSummary(null);
     setEndingValuation(null);
+    setUsedManualMapping(false);
+    setDuplicateImportWarning(null);
   }
 
   const previewColumns: TableColumn<EditableRow>[] = [
@@ -330,6 +370,7 @@ export function ImportPage() {
 
       {stage === 'preview' && (
         <Card title="Review before committing">
+          {duplicateImportWarning && <p className="warnings-inline">{duplicateImportWarning}</p>}
           {warnings.length > 0 && (
             <ul className="warnings">
               {warnings.map((w, i) => (

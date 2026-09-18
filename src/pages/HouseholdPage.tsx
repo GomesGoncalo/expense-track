@@ -25,7 +25,7 @@ import {
   computeSplitBalances,
 } from '../reporting/byPerson';
 import { formatPence } from '../utils/currency';
-import { periodRange } from '../utils/dates';
+import { latestDate, periodRange } from '../utils/dates';
 import type { Period } from '../utils/dates';
 import { getCategoricalColor, useColorScheme } from '../utils/palette';
 import { EmptyState } from '../components/common/EmptyState';
@@ -84,7 +84,12 @@ export function HouseholdPage() {
     () => computeHouseholdNetWorthSeries(activePersons, accounts, transactions, valuationSnapshots, 'week'),
     [activePersons, accounts, transactions, valuationSnapshots],
   );
-  const { start, end } = periodRange(period);
+  // Anchored on the most recent transaction date, not wall-clock today —
+  // statements are imported in batches, so "this month" would otherwise
+  // silently show empty for weeks after the last import (same reasoning as
+  // reporting/insights.ts).
+  const mostRecentDate = useMemo(() => latestDate(transactions), [transactions]);
+  const { start, end } = periodRange(period, mostRecentDate ?? undefined);
   const incomeExpense = useMemo(
     () => computeHouseholdIncomeExpense(activePersons, accounts, transactions, start, end),
     [activePersons, accounts, transactions, start, end],

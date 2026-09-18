@@ -192,6 +192,38 @@ describe('commitImport', () => {
     expect(snapshots[0].source).toBe('statement');
   });
 
+  it('picks the latest-dated row balance, not the array-last one, when rows are out of order', async () => {
+    // input.rows comes from the user-editable preview table (each date is a
+    // free-text field), so it can't be assumed to stay in parse order.
+    const account = await accountsRepo.createAccount({
+      name: 'Vanguard ISA',
+      bank: 'vanguard',
+      accountType: 'investment',
+      currency: 'GBP',
+      valuationBased: true,
+      owners: [],
+    });
+
+    await commitImport({
+      account,
+      fileName: 'q1.pdf',
+      rawTextHash: 'hash1',
+      pageCount: 1,
+      statementPeriodStart: '2026-01-01',
+      statementPeriodEnd: '2026-03-31',
+      columnMappingUsed: null,
+      rows: [
+        row({ date: '2026-03-31', balancePence: 520000 }),
+        row({ date: '2026-01-05', balancePence: 500000 }), // out of order, array-last
+      ],
+    });
+
+    const snapshots = await valuationSnapshotsRepo.listByAccount(account.id);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].valuePence).toBe(520000);
+    expect(snapshots[0].date).toBe('2026-03-31');
+  });
+
   it('suggests a transfer when a matching cross-account pair appears after commit', async () => {
     const accountA = await accountsRepo.createAccount({
       name: 'HSBC Current',

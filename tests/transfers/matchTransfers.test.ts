@@ -61,6 +61,15 @@ describe('findTransferCandidates', () => {
     expect(findTransferCandidates([outgoing, incoming])).toHaveLength(0);
   });
 
+  it('honors a non-zero amountTolerancePence override for same-currency legs', () => {
+    // Exercises the tolerance-scan fallback path (candidate generation can
+    // no longer rely on an exact-amount index once same-currency amounts
+    // are allowed to differ by a few pence).
+    const outgoing = txn({ accountId: 'accA', amountPence: -10000, currency: 'GBP' });
+    const incoming = txn({ accountId: 'accB', amountPence: 9950, currency: 'GBP' });
+    expect(findTransferCandidates([outgoing, incoming], { amountTolerancePence: 50 })).toHaveLength(1);
+  });
+
   it('ignores transactions already linked to a transfer', () => {
     const outgoing = txn({ accountId: 'accA', amountPence: -5000, transferId: 'existing' });
     const incoming = txn({ accountId: 'accB', amountPence: 5000 });

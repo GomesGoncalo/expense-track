@@ -351,7 +351,11 @@ export function parseRowsFromColumns(
       let balancePence: number | null = null;
       if (balanceText) {
         try {
-          balancePence = parseAmountToPence(balanceText);
+          // Same parser as the amount fields above, not the hardcoded
+          // default — a parser overriding amountParser for an inverted
+          // sign/format convention (e.g. HsbcCreditCardParser) needs its
+          // balance column read the same way, or the two would disagree.
+          balancePence = parseAmount(balanceText);
         } catch {
           balancePence = null;
         }

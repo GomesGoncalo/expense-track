@@ -64,36 +64,88 @@ function scoreCandidate(
 
 const MIN_CONFIDENCE_THRESHOLD = 0.4;
 
+function tryScore(
+  outgoing: Transaction,
+  incoming: Transaction,
+  opts: MatchOptions,
+  allCandidates: TransferCandidate[],
+): void {
+  if (outgoing.accountId === incoming.accountId) return;
+  if (daysBetween(outgoing.date, incoming.date) > opts.dateWindowDays) return;
+  const candidate = scoreCandidate(outgoing, incoming, opts);
+  if (candidate.confidence >= MIN_CONFIDENCE_THRESHOLD) allCandidates.push(candidate);
+}
+
 /**
  * Finds likely transfer pairs among unlinked transactions across different
  * accounts: an outgoing (negative) leg in one account matched to an incoming
  * (positive) leg in another, close in amount and date.
+ *
+ * Candidate generation is indexed by currency + exact amount rather than a
+ * plain nested loop over every outgoing×incoming pair: with the default
+ * options (same-currency legs must match to the exact pence), that lookup
+ * is O(1) per outgoing transaction instead of O(incoming count), which
+ * matters once a household's history grows into the thousands of
+ * transactions. Cross-currency legs use a percentage tolerance, so they
+ * can't be exact-amount-indexed and fall back to a scan — but only within
+ * that (usually small) other-currency subset, not the whole dataset. If
+ * `amountTolerancePence` is overridden away from its 0 default, same-currency
+ * legs need the same tolerance-scan fallback, since an exact-amount index
+ * can no longer answer "within N pence" lookups.
  */
 export function findTransferCandidates(
   transactions: Transaction[],
   options: Partial<MatchOptions> = {},
 ): TransferCandidate[] {
   const opts: MatchOptions = { ...DEFAULT_OPTIONS, ...options };
+  const exactAmountMatchOnly = opts.amountTolerancePence === 0;
 
   const unlinked = transactions.filter((t) => t.transferId === null);
   const outgoingTxns = unlinked.filter((t) => t.amountPence < 0);
   const incomingTxns = unlinked.filter((t) => t.amountPence > 0);
 
+  // Same-currency incoming transactions, indexed by exact amount magnitude.
+  const incomingByCurrencyAndAmount = new Map<string, Map<number, Transaction[]>>();
+  // Every incoming transaction, indexed by currency only — used for the
+  // cross-currency tolerance scan (and as the same-currency fallback when
+  // amountTolerancePence is overridden to non-zero).
+  const incomingByCurrency = new Map<string, Transaction[]>();
+  for (const incoming of incomingTxns) {
+    const currencyList = incomingByCurrency.get(incoming.currency);
+    if (currencyList) currencyList.push(incoming);
+    else incomingByCurrency.set(incoming.currency, [incoming]);
+
+    let byAmount = incomingByCurrencyAndAmount.get(incoming.currency);
+    if (!byAmount) {
+      byAmount = new Map();
+      incomingByCurrencyAndAmount.set(incoming.currency, byAmount);
+    }
+    const amount = Math.abs(incoming.amountPence);
+    const amountList = byAmount.get(amount);
+    if (amountList) amountList.push(incoming);
+    else byAmount.set(amount, [incoming]);
+  }
+
   const allCandidates: TransferCandidate[] = [];
   for (const outgoing of outgoingTxns) {
-    for (const incoming of incomingTxns) {
-      if (outgoing.accountId === incoming.accountId) continue;
-      const sameCurrency = outgoing.currency === incoming.currency;
-      if (
-        !amountsMatch(Math.abs(outgoing.amountPence), Math.abs(incoming.amountPence), sameCurrency, opts)
-      ) {
-        continue;
-      }
-      if (daysBetween(outgoing.date, incoming.date) > opts.dateWindowDays) continue;
+    const outgoingAbs = Math.abs(outgoing.amountPence);
 
-      const candidate = scoreCandidate(outgoing, incoming, opts);
-      if (candidate.confidence >= MIN_CONFIDENCE_THRESHOLD) {
-        allCandidates.push(candidate);
+    if (exactAmountMatchOnly) {
+      const sameCurrencyMatches = incomingByCurrencyAndAmount.get(outgoing.currency)?.get(outgoingAbs) ?? [];
+      for (const incoming of sameCurrencyMatches) tryScore(outgoing, incoming, opts, allCandidates);
+    } else {
+      const sameCurrencyMatches = incomingByCurrency.get(outgoing.currency) ?? [];
+      for (const incoming of sameCurrencyMatches) {
+        if (!amountsMatch(outgoingAbs, Math.abs(incoming.amountPence), true, opts)) continue;
+        tryScore(outgoing, incoming, opts, allCandidates);
+      }
+    }
+
+    for (const [currency, incomingList] of incomingByCurrency) {
+      if (currency === outgoing.currency) continue;
+      for (const incoming of incomingList) {
+        if (!amountsMatch(outgoingAbs, Math.abs(incoming.amountPence), false, opts)) continue;
+        tryScore(outgoing, incoming, opts, allCandidates);
       }
     }
   }
