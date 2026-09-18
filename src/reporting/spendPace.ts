@@ -1,5 +1,4 @@
-import { getDaysInMonth } from 'date-fns';
-import { daysBetween, periodRange } from '../utils/dates';
+import { daysBetween, daysInMonth as daysInMonthOf, latestDate, periodRange } from '../utils/dates';
 import type { Transaction } from '../domain/types';
 
 export interface SpendPace {
@@ -20,10 +19,7 @@ export interface SpendPace {
  * (no transactions at all, or none yet this month).
  */
 export function computeSpendPace(transactions: Transaction[]): SpendPace | null {
-  const anchorDate = transactions.reduce<string | null>(
-    (max, t) => (max === null || t.date > max ? t.date : max),
-    null,
-  );
+  const anchorDate = latestDate(transactions);
   if (anchorDate === null) return null;
 
   const { start: monthStart } = periodRange('this-month', anchorDate);
@@ -38,7 +34,7 @@ export function computeSpendPace(transactions: Transaction[]): SpendPace | null 
   }
   if (spendSoFarPence === 0) return null;
 
-  const daysInMonth = getDaysInMonth(new Date(`${monthStart}T00:00:00Z`));
+  const daysInMonth = daysInMonthOf(monthStart);
   const projectedSpendPence = Math.round((spendSoFarPence / daysElapsed) * daysInMonth);
 
   return { monthStart, anchorDate, daysElapsed, daysInMonth, spendSoFarPence, projectedSpendPence };

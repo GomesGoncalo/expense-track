@@ -39,6 +39,25 @@ export function todayIsoDate(): string {
   return format(new Date(), 'yyyy-MM-dd');
 }
 
+/**
+ * Number of days in the calendar month containing this ISO date (28-31).
+ * Built from the plain y/m numbers rather than `new Date(isoDate)` +
+ * date-fns's getDaysInMonth: that pair parses as UTC midnight but reads
+ * back via local-time getters, so in a negative-UTC-offset timezone the
+ * local day rolls back into the previous month and this silently returns
+ * the wrong count. Constructing and reading in the same (local) frame, as
+ * periodRange's 'last-month' branch already does, avoids the mismatch.
+ */
+export function daysInMonth(isoDate: string): number {
+  const [year, month] = isoDate.split('-').map(Number);
+  return new Date(year, month, 0).getDate();
+}
+
+/** Returns the most recent (max) date among items with an ISO `date` field, or null if empty. */
+export function latestDate<T extends { date: string }>(items: readonly T[]): string | null {
+  return items.reduce<string | null>((max, item) => (max === null || item.date > max ? item.date : max), null);
+}
+
 export type Period = 'this-month' | 'last-month' | 'ytd' | 'all-time';
 
 /**

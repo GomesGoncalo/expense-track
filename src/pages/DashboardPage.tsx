@@ -596,7 +596,9 @@ export function DashboardPage() {
               <p className={`stat-tile-value ${netWorthDrawdown.drawdownPence >= 0 ? 'positive' : 'negative'}`}>
                 {netWorthDrawdown.drawdownPence >= 0
                   ? 'At an all-time high'
-                  : `${netWorthDrawdown.drawdownPercent?.toFixed(1)}% below peak`}
+                  : netWorthDrawdown.drawdownPercent !== null
+                    ? `${netWorthDrawdown.drawdownPercent.toFixed(1)}% below peak`
+                    : `${formatPence(netWorthDrawdown.drawdownPence, 'GBP')} below peak`}
               </p>
               <p className="muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>
                 Peak {formatPence(netWorthDrawdown.peakGbpPence, 'GBP')} on {netWorthDrawdown.peakDate}

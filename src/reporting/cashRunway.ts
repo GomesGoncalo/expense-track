@@ -1,6 +1,6 @@
 import { computeIncomeExpenseSeries } from './incomeExpense';
 import { computeLatestBalances, toGbpPence } from './netWorth';
-import { periodRange } from '../utils/dates';
+import { latestDate, periodRange } from '../utils/dates';
 import type { Account, Transaction, ValuationSnapshot } from '../domain/types';
 
 export interface CashRunway {
@@ -41,10 +41,7 @@ export function computeCashRunway(
     if (gbpPence !== null) liquidCashGbpPence += gbpPence;
   }
 
-  const mostRecentDate = transactions.reduce<string | null>(
-    (max, t) => (max === null || t.date > max ? t.date : max),
-    null,
-  );
+  const mostRecentDate = latestDate(transactions);
   if (mostRecentDate === null) return null;
 
   const thisMonthStart = periodRange('this-month', mostRecentDate).start;

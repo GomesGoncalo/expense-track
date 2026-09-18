@@ -1,6 +1,6 @@
 import { computeCategorySpendingSeries, computeSpendingByCategory, UNCATEGORIZED } from './byCategory';
 import { computeIncomeExpenseSummary } from './incomeExpense';
-import { periodRange } from '../utils/dates';
+import { latestDate, periodRange } from '../utils/dates';
 import { formatPence } from '../utils/currency';
 import type { Transaction, Transfer } from '../domain/types';
 
@@ -35,10 +35,7 @@ export function computeInsights(transactions: Transaction[], transfers: Transfer
   // is anchored on the most recent transaction date rather than wall-clock
   // today — otherwise every insight below goes silent for weeks after the
   // last import, once today's calendar month has no data yet.
-  const mostRecentDate = transactions.reduce<string | null>(
-    (max, t) => (max === null || t.date > max ? t.date : max),
-    null,
-  );
+  const mostRecentDate = latestDate(transactions);
   const thisMonth = periodRange('this-month', mostRecentDate ?? undefined);
   const lastMonth = periodRange('last-month', mostRecentDate ?? undefined);
 

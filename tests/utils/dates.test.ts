@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daysBetween, parseStatementDate, periodRange, todayIsoDate } from '../../src/utils/dates';
+import { daysBetween, daysInMonth, latestDate, parseStatementDate, periodRange, todayIsoDate } from '../../src/utils/dates';
 
 describe('parseStatementDate', () => {
   it('parses dd/MM/yyyy', () => {
@@ -61,5 +61,35 @@ describe('periodRange', () => {
     const { start, end } = periodRange('all-time');
     expect(start).toBe('0000-01-01');
     expect(end).toBe(todayIsoDate());
+  });
+});
+
+describe('daysInMonth', () => {
+  it('returns 28 for a non-leap February', () => {
+    expect(daysInMonth('2026-02-15')).toBe(28);
+  });
+
+  it('returns 29 for a leap February', () => {
+    expect(daysInMonth('2024-02-01')).toBe(29);
+  });
+
+  it('returns 31 for a 31-day month, using any day within it', () => {
+    expect(daysInMonth('2026-01-01')).toBe(31);
+    expect(daysInMonth('2026-01-31')).toBe(31);
+  });
+
+  it('returns 30 for a 30-day month', () => {
+    expect(daysInMonth('2026-04-10')).toBe(30);
+  });
+});
+
+describe('latestDate', () => {
+  it('returns the max date among items', () => {
+    const items = [{ date: '2026-01-05' }, { date: '2026-03-01' }, { date: '2026-02-20' }];
+    expect(latestDate(items)).toBe('2026-03-01');
+  });
+
+  it('returns null for an empty list', () => {
+    expect(latestDate([])).toBeNull();
   });
 });
