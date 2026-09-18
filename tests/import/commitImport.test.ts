@@ -60,6 +60,78 @@ describe('commitImport', () => {
     expect(transactions).toHaveLength(2);
   });
 
+  it('auto-categorizes each row on commit', async () => {
+    const account = await accountsRepo.createAccount({
+      name: 'HSBC Current',
+      bank: 'hsbc',
+      accountType: 'current',
+      currency: 'GBP',
+      valuationBased: false,
+      owners: [],
+    });
+
+    await commitImport({
+      account,
+      fileName: 'jan.pdf',
+      rawTextHash: 'hash1',
+      pageCount: 1,
+      statementPeriodStart: '2026-01-01',
+      statementPeriodEnd: '2026-01-31',
+      columnMappingUsed: null,
+      rows: [row(), row({ date: '2026-01-06', description: 'SALARY', amountPence: 200000 })],
+    });
+
+    const transactions = await transactionsRepo.listByAccount(account.id);
+    const byDescription = Object.fromEntries(transactions.map((t) => [t.description, t.category]));
+    expect(byDescription['TESCO STORES']).toBe('Groceries');
+    expect(byDescription['SALARY']).toBe('Income');
+  });
+
+  it('reuses a manually corrected category for a later import with the same description', async () => {
+    const account = await accountsRepo.createAccount({
+      name: 'HSBC Current',
+      bank: 'hsbc',
+      accountType: 'current',
+      currency: 'GBP',
+      valuationBased: false,
+      owners: [],
+    });
+
+    // "LOCAL CORNER SHOP" doesn't match any keyword rule, so it lands uncategorized...
+    await commitImport({
+      account,
+      fileName: 'jan.pdf',
+      rawTextHash: 'hash1',
+      pageCount: 1,
+      statementPeriodStart: '2026-01-01',
+      statementPeriodEnd: '2026-01-31',
+      columnMappingUsed: null,
+      rows: [row({ description: 'LOCAL CORNER SHOP', amountPence: -400 })],
+    });
+    const firstPass = await transactionsRepo.listByAccount(account.id);
+    expect(firstPass[0].category).toBeNull();
+
+    // ...the user corrects it by hand...
+    await transactionsRepo.updateTransaction({ ...firstPass[0], category: 'Groceries' });
+
+    // ...and the next month's statement (a different day, so it's not a dedupe-skipped duplicate)
+    // should pick up that same category automatically.
+    await commitImport({
+      account,
+      fileName: 'feb.pdf',
+      rawTextHash: 'hash2',
+      pageCount: 1,
+      statementPeriodStart: '2026-02-01',
+      statementPeriodEnd: '2026-02-28',
+      columnMappingUsed: null,
+      rows: [row({ date: '2026-02-05', description: 'LOCAL CORNER SHOP', amountPence: -450 })],
+    });
+
+    const secondPass = await transactionsRepo.listByAccount(account.id);
+    const february = secondPass.find((t) => t.date === '2026-02-05');
+    expect(february?.category).toBe('Groceries');
+  });
+
   it('skips rows that duplicate an already-imported transaction', async () => {
     const account = await accountsRepo.createAccount({
       name: 'HSBC Current',

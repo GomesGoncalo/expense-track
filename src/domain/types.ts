@@ -1,3 +1,5 @@
+import type { Category } from './categories';
+
 export type BankId =
   | 'first-direct'
   | 'hsbc'
@@ -83,7 +85,7 @@ export interface Transaction {
   currency: string; // usually == account currency; Revolut rows can differ
   dedupeHash: string;
   transferId: string | null;
-  category: string | null; // reserved for future use, unused in v1
+  category: Category | null; // null = uncategorized (auto-categorization couldn't guess, or the user cleared it)
   /**
    * Overrides the owning account's owners for *this transaction only*, when
    * splitting income/expense by person (e.g. a dinner paid from one

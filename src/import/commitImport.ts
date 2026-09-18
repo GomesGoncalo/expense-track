@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../domain/id';
 import { computeDedupeHash } from '../domain/hash';
+import { buildPriorCategoryLookup, resolveCategory } from '../domain/autoCategorize';
 import * as transactionsRepo from '../db/transactionsRepo';
 import * as statementImportsRepo from '../db/statementImportsRepo';
 import * as valuationSnapshotsRepo from '../db/valuationSnapshotsRepo';
@@ -52,6 +53,12 @@ export async function commitImport(input: CommitImportInput): Promise<CommitImpo
   const insertedTransactions: Transaction[] = [];
   let skippedDuplicate = 0;
 
+  // Built once from everything already in the DB, so a description that
+  // recurs (a subscription, a regular direct debit) picks up whatever
+  // category it was given last time — including a manual correction —
+  // instead of re-running the generic keyword guess every time.
+  const priorCategories = buildPriorCategoryLookup(await transactionsRepo.listAll());
+
   for (const row of input.rows) {
     const dedupeHash = await computeDedupeHash(input.account.id, row.date, row.description, row.amountPence);
     const existing = await transactionsRepo.findByHash(input.account.id, dedupeHash);
@@ -70,7 +77,7 @@ export async function commitImport(input: CommitImportInput): Promise<CommitImpo
       currency: row.currency,
       dedupeHash,
       transferId: null,
-      category: null,
+      category: resolveCategory(row.description, row.amountPence, priorCategories),
       splitOverride: null,
       createdAt: nowIso(),
     });

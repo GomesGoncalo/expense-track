@@ -30,7 +30,8 @@ async function sha256Hex(input: string): Promise<string> {
   return cyrb53Hex(input);
 }
 
-function normalizeDescription(description: string): string {
+/** Also used outside hashing (e.g. to match "the same transaction description" for category learning). */
+export function normalizeDescription(description: string): string {
   return description.trim().replace(/\s+/g, ' ').toUpperCase();
 }
 

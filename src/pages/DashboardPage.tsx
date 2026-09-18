@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { BarChart3, Download, TrendingUp, Upload, Wallet } from 'lucide-react';
+import { BarChart3, Download, PieChart, TrendingUp, Upload, Wallet } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import { computeNetWorthSeries, computeNetWorthSummary } from '../reporting/netWorth';
 import { computeIncomeExpenseSeries, computeIncomeExpenseSummary } from '../reporting/incomeExpense';
+import { computeSpendingByCategory } from '../reporting/byCategory';
 import { exportBackup, downloadBackup, readBackupFile, importBackup } from '../db/backup';
 import { formatPence } from '../utils/currency';
 import { todayIsoDate } from '../utils/dates';
@@ -50,6 +51,15 @@ export function DashboardPage() {
   );
   const { start, end } = periodRange(period);
   const incomeExpense = useMemo(() => computeIncomeExpenseSummary(transactions, start, end), [transactions, start, end]);
+  const spendingByCategory = useMemo(() => computeSpendingByCategory(transactions, start, end), [transactions, start, end]);
+  const spendingChartData = useMemo(() => {
+    const top = spendingByCategory.slice(0, 7);
+    const rest = spendingByCategory.slice(7);
+    const restTotal = rest.reduce((sum, c) => sum + c.expensePence, 0);
+    const rows = top.map((c) => ({ category: c.category, amount: c.expensePence / 100 }));
+    if (restTotal > 0) rows.push({ category: 'Other', amount: restTotal / 100 });
+    return rows;
+  }, [spendingByCategory]);
   const cashFlowSeries = useMemo(() => computeIncomeExpenseSeries(transactions, 'month'), [transactions]);
   const cashFlowChartData = cashFlowSeries.map((p) => ({
     period: p.period.slice(0, 7),
@@ -190,6 +200,25 @@ export function DashboardPage() {
         <p className="muted" style={{ marginTop: 12 }}>
           Confirmed transfers between your own accounts are excluded from these totals.
         </p>
+      </div>
+
+      <div className="card">
+        <h3>
+          <PieChart size={18} /> Spending by category (this period)
+        </h3>
+        {spendingChartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={Math.max(160, spendingChartData.length * 40)}>
+            <BarChart data={spendingChartData} layout="vertical" margin={{ left: 16 }}>
+              <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+              <XAxis type="number" tickFormatter={(v) => formatPence(v * 100, 'GBP')} tick={{ fontSize: 12 }} />
+              <YAxis type="category" dataKey="category" width={130} tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
+              <Bar dataKey="amount" fill="var(--negative)" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyState title="No spending yet" description="Import a statement to see where your money is going." />
+        )}
       </div>
 
       <div className="card">

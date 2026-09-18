@@ -361,6 +361,16 @@ input::placeholder {
   color: var(--text-muted);
 }
 
+.table select {
+  padding: 4px 6px;
+  font-size: 0.85rem;
+}
+
+select.category-unset {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
 input:focus-visible,
 select:focus-visible,
 button:focus-visible,
