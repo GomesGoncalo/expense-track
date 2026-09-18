@@ -39,6 +39,7 @@ describe('commitImport', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
 
     const result = await commitImport({
@@ -66,6 +67,7 @@ describe('commitImport', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
 
     const commitInput = {
@@ -95,6 +97,7 @@ describe('commitImport', () => {
       accountType: 'investment',
       currency: 'GBP',
       valuationBased: true,
+      owners: [],
     });
 
     await commitImport({
@@ -124,6 +127,7 @@ describe('commitImport', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
     const accountB = await accountsRepo.createAccount({
       name: 'Monzo Current',
@@ -131,6 +135,7 @@ describe('commitImport', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
 
     await commitImport({

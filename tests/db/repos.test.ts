@@ -46,6 +46,7 @@ describe('accountsRepo', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
     const all = await accountsRepo.listAccounts();
     expect(all).toHaveLength(1);
@@ -60,6 +61,7 @@ describe('accountsRepo', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
     await accountsRepo.archiveAccount(account.id);
     const fetched = await accountsRepo.getAccount(account.id);
@@ -73,6 +75,7 @@ describe('accountsRepo', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
     const accountB = await accountsRepo.createAccount({
       name: 'B',
@@ -80,6 +83,7 @@ describe('accountsRepo', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
 
     const outgoing = makeTransaction({ accountId: accountA.id, amountPence: -500 });

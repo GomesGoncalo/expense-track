@@ -1,16 +1,18 @@
 import { getDb } from './client';
 import * as accountsRepo from './accountsRepo';
+import * as personsRepo from './personsRepo';
 import * as statementImportsRepo from './statementImportsRepo';
 import * as transactionsRepo from './transactionsRepo';
 import * as transfersRepo from './transfersRepo';
 import * as valuationSnapshotsRepo from './valuationSnapshotsRepo';
-import type { Account, StatementImport, Transaction, Transfer, ValuationSnapshot } from '../domain/types';
+import type { Account, Person, StatementImport, Transaction, Transfer, ValuationSnapshot } from '../domain/types';
 
-export const BACKUP_SCHEMA_VERSION = 1 as const;
+export const BACKUP_SCHEMA_VERSION = 2 as const;
 
 export interface BackupFileV1 {
-  schemaVersion: 1;
+  schemaVersion: 2;
   exportedAt: string;
+  persons: Person[];
   accounts: Account[];
   statementImports: StatementImport[];
   transactions: Transaction[];
@@ -21,6 +23,7 @@ export interface BackupFileV1 {
 export type ImportMode = 'replace' | 'merge';
 
 export interface ImportSummary {
+  personsAdded: number;
   accountsAdded: number;
   transactionsAdded: number;
   transactionsSkippedDuplicate: number;
@@ -30,7 +33,8 @@ export interface ImportSummary {
 }
 
 export async function exportBackup(): Promise<BackupFileV1> {
-  const [accounts, statementImports, transactions, transfers, valuationSnapshots] = await Promise.all([
+  const [persons, accounts, statementImports, transactions, transfers, valuationSnapshots] = await Promise.all([
+    personsRepo.listPersons(),
     accountsRepo.listAccounts(),
     statementImportsRepo.listAll(),
     transactionsRepo.listAll(),
@@ -40,6 +44,7 @@ export async function exportBackup(): Promise<BackupFileV1> {
   return {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
+    persons,
     accounts,
     statementImports,
     transactions,
@@ -70,6 +75,7 @@ function validateBackup(data: unknown): asserts data is BackupFileV1 {
     );
   }
   const requiredArrays: (keyof BackupFileV1)[] = [
+    'persons',
     'accounts',
     'statementImports',
     'transactions',
@@ -96,6 +102,7 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
 
   if (mode === 'replace') {
     await Promise.all([
+      db.clear('persons'),
       db.clear('accounts'),
       db.clear('statementImports'),
       db.clear('transactions'),
@@ -103,9 +110,10 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
       db.clear('valuationSnapshots'),
     ]);
     const tx = db.transaction(
-      ['accounts', 'statementImports', 'transactions', 'transfers', 'valuationSnapshots'],
+      ['persons', 'accounts', 'statementImports', 'transactions', 'transfers', 'valuationSnapshots'],
       'readwrite',
     );
+    for (const person of backup.persons) await tx.objectStore('persons').put(person);
     for (const account of backup.accounts) await tx.objectStore('accounts').put(account);
     for (const si of backup.statementImports) await tx.objectStore('statementImports').put(si);
     for (const transaction of backup.transactions) await tx.objectStore('transactions').put(transaction);
@@ -116,6 +124,7 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
     await tx.done;
 
     return {
+      personsAdded: backup.persons.length,
       accountsAdded: backup.accounts.length,
       transactionsAdded: backup.transactions.length,
       transactionsSkippedDuplicate: 0,
@@ -127,6 +136,7 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
 
   // merge mode: skip anything whose id already exists; dedupe transactions by hash too.
   const summary: ImportSummary = {
+    personsAdded: 0,
     accountsAdded: 0,
     transactionsAdded: 0,
     transactionsSkippedDuplicate: 0,
@@ -134,6 +144,13 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
     transfersAdded: 0,
     valuationSnapshotsAdded: 0,
   };
+
+  const existingPersonIds = new Set((await db.getAllKeys('persons')) as string[]);
+  for (const person of backup.persons) {
+    if (existingPersonIds.has(person.id)) continue;
+    await db.put('persons', person);
+    summary.personsAdded += 1;
+  }
 
   const existingAccountIds = new Set((await db.getAllKeys('accounts')) as string[]);
   for (const account of backup.accounts) {

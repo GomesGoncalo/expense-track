@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import * as accountsRepo from '../db/accountsRepo';
+import * as personsRepo from '../db/personsRepo';
 import * as transactionsRepo from '../db/transactionsRepo';
 import * as transfersRepo from '../db/transfersRepo';
 import * as valuationSnapshotsRepo from '../db/valuationSnapshotsRepo';
-import type { Account, Transaction, Transfer, ValuationSnapshot } from '../domain/types';
+import type { Account, Person, Transaction, Transfer, ValuationSnapshot } from '../domain/types';
 
 interface AppState {
+  persons: Person[];
   accounts: Account[];
   transactions: Transaction[];
   transfers: Transfer[];
@@ -15,18 +17,20 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
+  persons: [],
   accounts: [],
   transactions: [],
   transfers: [],
   valuationSnapshots: [],
   loaded: false,
   refresh: async () => {
-    const [accounts, transactions, transfers, valuationSnapshots] = await Promise.all([
+    const [persons, accounts, transactions, transfers, valuationSnapshots] = await Promise.all([
+      personsRepo.listPersons(),
       accountsRepo.listAccounts(),
       transactionsRepo.listAll(),
       transfersRepo.listAll(),
       valuationSnapshotsRepo.listAll(),
     ]);
-    set({ accounts, transactions, transfers, valuationSnapshots, loaded: true });
+    set({ persons, accounts, transactions, transfers, valuationSnapshots, loaded: true });
   },
 }));

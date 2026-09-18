@@ -22,6 +22,13 @@ export interface NetWorthSummary {
   accountsMissingRate: AccountBalance[];
 }
 
+/** Converts a native-currency pence amount into GBP pence using the account's manual rate, if any. */
+export function toGbpPence(account: Account, balancePence: number): number | null {
+  if (account.currency === 'GBP') return balancePence;
+  if (account.manualRateToGbp !== null) return Math.round(balancePence * account.manualRateToGbp);
+  return null;
+}
+
 function latestBalanceForAccount(
   account: Account,
   transactions: Transaction[],
@@ -95,10 +102,9 @@ export function computeNetWorthSummary(
   for (const balance of balances) {
     const account = accountsById.get(balance.accountId);
     if (!account) continue;
-    if (account.currency === 'GBP') {
-      combinedGbpTotalPence += balance.latestBalancePence;
-    } else if (account.manualRateToGbp !== null) {
-      combinedGbpTotalPence += Math.round(balance.latestBalancePence * account.manualRateToGbp);
+    const gbpPence = toGbpPence(account, balance.latestBalancePence);
+    if (gbpPence !== null) {
+      combinedGbpTotalPence += gbpPence;
     } else {
       accountsMissingRate.push(balance);
     }
@@ -115,7 +121,7 @@ export interface NetWorthPoint {
   perAccountPence: Record<string, number>;
 }
 
-function bucketDate(isoDate: string, granularity: NetWorthGranularity): string {
+export function bucketDate(isoDate: string, granularity: NetWorthGranularity): string {
   if (granularity === 'day') return isoDate;
   const d = new Date(isoDate);
   if (granularity === 'week') {
@@ -129,7 +135,7 @@ function bucketDate(isoDate: string, granularity: NetWorthGranularity): string {
 }
 
 /** Builds a forward-filled step function of {date -> balancePence} for one account. */
-function buildBalanceSeries(
+export function buildBalanceSeries(
   account: Account,
   transactions: Transaction[],
   valuationSnapshots: ValuationSnapshot[],
@@ -183,11 +189,8 @@ export function computeNetWorthSeries(
       const balance = lastKnown.get(account.id);
       if (balance === undefined) continue;
       perAccountPence[account.id] = balance;
-      if (account.currency === 'GBP') {
-        totalGbpPence += balance;
-      } else if (account.manualRateToGbp !== null) {
-        totalGbpPence += Math.round(balance * account.manualRateToGbp);
-      }
+      const gbpPence = toGbpPence(account, balance);
+      if (gbpPence !== null) totalGbpPence += gbpPence;
     }
 
     // Overwrite with the latest point within the bucket, so each bucket

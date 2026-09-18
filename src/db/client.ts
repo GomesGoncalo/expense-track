@@ -8,24 +8,29 @@ let dbPromise: Promise<IDBPDatabase<ExpenseTrackDB>> | null = null;
 export function getDb(): Promise<IDBPDatabase<ExpenseTrackDB>> {
   if (!dbPromise) {
     dbPromise = openDB<ExpenseTrackDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        const accounts = db.createObjectStore('accounts', { keyPath: 'id' });
-        accounts.createIndex('by-bank', 'bank');
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          const accounts = db.createObjectStore('accounts', { keyPath: 'id' });
+          accounts.createIndex('by-bank', 'bank');
 
-        const statementImports = db.createObjectStore('statementImports', { keyPath: 'id' });
-        statementImports.createIndex('by-account', 'accountId');
+          const statementImports = db.createObjectStore('statementImports', { keyPath: 'id' });
+          statementImports.createIndex('by-account', 'accountId');
 
-        const transactions = db.createObjectStore('transactions', { keyPath: 'id' });
-        transactions.createIndex('by-account', 'accountId');
-        transactions.createIndex('by-dedupeHash', 'dedupeHash');
-        transactions.createIndex('by-statementImport', 'statementImportId');
-        transactions.createIndex('by-date', 'date');
+          const transactions = db.createObjectStore('transactions', { keyPath: 'id' });
+          transactions.createIndex('by-account', 'accountId');
+          transactions.createIndex('by-dedupeHash', 'dedupeHash');
+          transactions.createIndex('by-statementImport', 'statementImportId');
+          transactions.createIndex('by-date', 'date');
 
-        const transfers = db.createObjectStore('transfers', { keyPath: 'id' });
-        transfers.createIndex('by-status', 'status');
+          const transfers = db.createObjectStore('transfers', { keyPath: 'id' });
+          transfers.createIndex('by-status', 'status');
 
-        const valuationSnapshots = db.createObjectStore('valuationSnapshots', { keyPath: 'id' });
-        valuationSnapshots.createIndex('by-account', 'accountId');
+          const valuationSnapshots = db.createObjectStore('valuationSnapshots', { keyPath: 'id' });
+          valuationSnapshots.createIndex('by-account', 'accountId');
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore('persons', { keyPath: 'id' });
+        }
       },
     });
   }

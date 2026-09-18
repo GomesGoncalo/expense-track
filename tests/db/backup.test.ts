@@ -8,6 +8,7 @@ import type { Transaction } from '../../src/domain/types';
 
 async function clearAllStores() {
   const db = await getDb();
+  await db.clear('persons');
   await db.clear('accounts');
   await db.clear('statementImports');
   await db.clear('transactions');
@@ -45,6 +46,7 @@ describe('backup export/import round-trip', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
     const txn = makeTransaction({ accountId: account.id });
     await transactionsRepo.insertMany([txn]);
@@ -72,6 +74,7 @@ describe('backup export/import round-trip', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
     const txn = makeTransaction({ accountId: account.id, dedupeHash: 'dup-hash' });
     await transactionsRepo.insertMany([txn]);
@@ -87,7 +90,7 @@ describe('backup export/import round-trip', () => {
   });
 
   it('rejects a backup with an unsupported schema version', async () => {
-    const bogus = { schemaVersion: 999, accounts: [], statementImports: [], transactions: [], transfers: [], valuationSnapshots: [] };
+    const bogus = { schemaVersion: 999, persons: [], accounts: [], statementImports: [], transactions: [], transfers: [], valuationSnapshots: [] };
     // @ts-expect-error intentionally malformed for the test
     await expect(importBackup(bogus, 'replace')).rejects.toThrow(/schema version/i);
   });
@@ -99,6 +102,7 @@ describe('backup export/import round-trip', () => {
       accountType: 'current',
       currency: 'GBP',
       valuationBased: false,
+      owners: [],
     });
     const backup = await exportBackup();
     const file = new File([JSON.stringify(backup)], 'backup.json', { type: 'application/json' });

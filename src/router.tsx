@@ -4,6 +4,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { AccountsPage } from './pages/AccountsPage';
 import { ImportPage } from './pages/ImportPage';
 import { TransactionsPage } from './pages/TransactionsPage';
+import { HouseholdPage } from './pages/HouseholdPage';
 
 export function AppRouter() {
   return (
@@ -14,6 +15,7 @@ export function AppRouter() {
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
+          <Route path="household" element={<HouseholdPage />} />
         </Route>
       </Routes>
     </HashRouter>

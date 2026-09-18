@@ -2,6 +2,7 @@ import type { DBSchema } from 'idb';
 import type {
   Account,
   BankId,
+  Person,
   StatementImport,
   Transaction,
   Transfer,
@@ -10,6 +11,10 @@ import type {
 } from '../domain/types';
 
 export interface ExpenseTrackDB extends DBSchema {
+  persons: {
+    key: string;
+    value: Person;
+  };
   accounts: {
     key: string;
     value: Account;
@@ -43,4 +48,4 @@ export interface ExpenseTrackDB extends DBSchema {
 }
 
 export const DB_NAME = 'expense-track';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;

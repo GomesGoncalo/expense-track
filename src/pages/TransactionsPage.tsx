@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
+import { ArrowLeftRight } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import * as transfersRepo from '../db/transfersRepo';
 import { formatPence } from '../utils/currency';
+import { EmptyState } from '../components/common/EmptyState';
 import type { Transaction } from '../domain/types';
 
 export function TransactionsPage() {
@@ -85,8 +87,12 @@ export function TransactionsPage() {
       return (
         <span className="chip chip-suggested">
           Possible transfer ↔ {otherAccountName}
-          <button onClick={() => handleConfirm(transfer.id)}>Confirm</button>
-          <button onClick={() => handleReject(transfer.id)}>Reject</button>
+          <button className="btn-sm" onClick={() => handleConfirm(transfer.id)}>
+            Confirm
+          </button>
+          <button className="btn-sm" onClick={() => handleReject(transfer.id)}>
+            Reject
+          </button>
         </span>
       );
     }
@@ -94,14 +100,21 @@ export function TransactionsPage() {
     return (
       <span className="chip chip-confirmed">
         Transfer ↔ {otherAccountName}
-        <button onClick={() => handleUnlink(transfer.id)}>Unlink</button>
+        <button className="btn-sm" onClick={() => handleUnlink(transfer.id)}>
+          Unlink
+        </button>
       </span>
     );
   }
 
   return (
     <div className="page">
-      <h2>Transactions</h2>
+      <div className="page-header">
+        <div>
+          <h2>Transactions</h2>
+          <p className="page-subtitle">Search, filter, and manage transfers across every account.</p>
+        </div>
+      </div>
 
       <div className="card form-grid form-inline">
         <label>
@@ -119,41 +132,48 @@ export function TransactionsPage() {
           Search description
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="e.g. Tesco" />
         </label>
-        {selectedForLink.length === 2 && <button onClick={handleManualLink}>Link selected as transfer</button>}
+        {selectedForLink.length === 2 && (
+          <button className="btn btn-primary" onClick={handleManualLink}>
+            Link selected as transfer
+          </button>
+        )}
       </div>
 
       <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Account</th>
-              <th>Description</th>
-              <th>Amount</th>
-              <th>Balance</th>
-              <th>Transfer</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((t) => (
-              <tr key={t.id}>
-                <td>{t.date}</td>
-                <td>{accountsById.get(t.accountId)?.name ?? '—'}</td>
-                <td>{t.description}</td>
-                <td className={t.amountPence < 0 ? 'negative' : 'positive'}>{formatPence(t.amountPence, t.currency)}</td>
-                <td>{t.balancePence !== null ? formatPence(t.balancePence, t.currency) : '—'}</td>
-                <td>{transferBadge(t)}</td>
-              </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={6} className="muted">
-                  No transactions match this filter.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={<ArrowLeftRight size={32} />}
+            title="No transactions match this filter"
+            description={transactions.length === 0 ? 'Import a statement to see transactions here.' : undefined}
+          />
+        ) : (
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Account</th>
+                  <th>Description</th>
+                  <th>Amount</th>
+                  <th>Balance</th>
+                  <th>Transfer</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((t) => (
+                  <tr key={t.id}>
+                    <td>{t.date}</td>
+                    <td>{accountsById.get(t.accountId)?.name ?? '—'}</td>
+                    <td>{t.description}</td>
+                    <td className={t.amountPence < 0 ? 'negative' : 'positive'}>{formatPence(t.amountPence, t.currency)}</td>
+                    <td>{t.balancePence !== null ? formatPence(t.balancePence, t.currency) : '—'}</td>
+                    <td>{transferBadge(t)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

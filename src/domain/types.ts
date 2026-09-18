@@ -14,6 +14,22 @@ export type AccountType =
   | 'investment'
   | 'other';
 
+/** A household member. Accounts are attributed to one or more people via Account.owners. */
+export interface Person {
+  id: string;
+  name: string;
+  /** Index into the categorical palette (src/utils/palette.ts); resolved to a light/dark hex at render time. */
+  colorIndex: number;
+  createdAt: string;
+  archived: boolean;
+}
+
+/** One person's share of an account. All of an account's owners' sharePercent must sum to 100. */
+export interface AccountOwner {
+  personId: string;
+  sharePercent: number; // 0-100
+}
+
 export interface Account {
   id: string;
   name: string;
@@ -34,6 +50,8 @@ export interface Account {
    * Only meaningful when currency !== 'GBP'.
    */
   manualRateToGbp: number | null;
+  /** Who this account belongs to, and in what proportion (joint accounts split by share). */
+  owners: AccountOwner[];
   createdAt: string;
   archived: boolean;
 }

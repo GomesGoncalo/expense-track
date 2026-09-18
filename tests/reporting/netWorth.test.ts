@@ -16,6 +16,7 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
     currency: 'GBP',
     valuationBased: false,
     manualRateToGbp: null,
+    owners: [],
     createdAt: nowIso(),
     archived: false,
     ...overrides,

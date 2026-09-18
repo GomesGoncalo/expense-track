@@ -1,11 +1,15 @@
 import { useMemo, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Download, TrendingUp, Upload, Wallet } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import { computeNetWorthSeries, computeNetWorthSummary } from '../reporting/netWorth';
 import { computeIncomeExpenseSummary } from '../reporting/incomeExpense';
 import { exportBackup, downloadBackup, readBackupFile, importBackup } from '../db/backup';
 import { formatPence } from '../utils/currency';
 import { todayIsoDate } from '../utils/dates';
+import { getCategoricalColor, useColorScheme } from '../utils/palette';
+import { EmptyState } from '../components/common/EmptyState';
 import type { ImportMode } from '../db/backup';
 
 type Period = 'this-month' | 'last-month' | 'ytd' | 'all-time';
@@ -33,6 +37,8 @@ export function DashboardPage() {
   const { accounts, transactions, valuationSnapshots, refresh } = useAppStore();
   const [period, setPeriod] = useState<Period>('this-month');
   const [importMessage, setImportMessage] = useState<string | null>(null);
+  const scheme = useColorScheme();
+  const accentColor = getCategoricalColor(0, scheme === 'dark');
 
   const netWorth = useMemo(
     () => computeNetWorthSummary(accounts, transactions, valuationSnapshots),
@@ -52,7 +58,7 @@ export function DashboardPage() {
     downloadBackup(backup);
   }
 
-  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImportFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     const mode: ImportMode = confirm('Replace all local data with this backup? Choose Cancel to merge instead.')
@@ -62,7 +68,7 @@ export function DashboardPage() {
       const backup = await readBackupFile(file);
       const summary = await importBackup(backup, mode);
       setImportMessage(
-        `Imported: ${summary.accountsAdded} account(s), ${summary.transactionsAdded} transaction(s) ` +
+        `Imported: ${summary.personsAdded} person(s), ${summary.accountsAdded} account(s), ${summary.transactionsAdded} transaction(s) ` +
           `(${summary.transactionsSkippedDuplicate} duplicate(s) skipped).`,
       );
       await refresh();
@@ -73,12 +79,21 @@ export function DashboardPage() {
     }
   }
 
+  const accountBalanceRows = netWorth.subtotalsByCurrency.flatMap((s) => s.accountBalances);
+
   return (
     <div className="page">
-      <h2>Dashboard</h2>
+      <div className="page-header">
+        <div>
+          <h2>Dashboard</h2>
+          <p className="page-subtitle">Your overall net worth and cash flow, all in one place.</p>
+        </div>
+      </div>
 
       <div className="card">
-        <h3>Net worth</h3>
+        <h3>
+          <Wallet size={18} /> Net worth
+        </h3>
         <p className="big-number">{formatPence(netWorth.combinedGbpTotalPence, 'GBP')}</p>
         {netWorth.subtotalsByCurrency.length > 1 && (
           <p className="muted">
@@ -94,70 +109,91 @@ export function DashboardPage() {
       </div>
 
       <div className="card">
-        <h3>Net worth over time</h3>
+        <h3>
+          <TrendingUp size={18} /> Net worth over time
+        </h3>
         {series.length > 0 ? (
           <ResponsiveContainer width="100%" height={280}>
             <AreaChart data={series}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" />
-              <YAxis tickFormatter={(v) => formatPence(v, 'GBP')} width={90} />
+              <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+              <YAxis tickFormatter={(v) => formatPence(v, 'GBP')} width={90} tick={{ fontSize: 12 }} />
               <Tooltip formatter={(v) => formatPence(Number(v), 'GBP')} />
-              <Area type="monotone" dataKey="totalGbpPence" stroke="#3b6fd6" fill="#3b6fd633" />
+              <Area type="monotone" dataKey="totalGbpPence" stroke={accentColor} fill={accentColor} fillOpacity={0.18} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         ) : (
-          <p className="muted">Import some statements to see net worth over time.</p>
+          <EmptyState title="No data yet" description="Import a statement to see your net worth trend here." />
         )}
       </div>
 
       <div className="card">
         <h3>Accounts</h3>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Account</th>
-              <th>Balance</th>
-              <th>As of</th>
-            </tr>
-          </thead>
-          <tbody>
-            {netWorth.subtotalsByCurrency
-              .flatMap((s) => s.accountBalances)
-              .map((b) => (
-                <tr key={b.accountId}>
-                  <td>{accountsById.get(b.accountId)?.name ?? '—'}</td>
-                  <td>{formatPence(b.latestBalancePence, b.currency)}</td>
-                  <td>{b.asOfDate}</td>
+        {accountBalanceRows.length === 0 ? (
+          <EmptyState title="No account balances yet" description="Add an account and import a statement to get started." />
+        ) : (
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Balance</th>
+                  <th>As of</th>
                 </tr>
-              ))}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {accountBalanceRows.map((b) => (
+                  <tr key={b.accountId}>
+                    <td>{accountsById.get(b.accountId)?.name ?? '—'}</td>
+                    <td>{formatPence(b.latestBalancePence, b.currency)}</td>
+                    <td>{b.asOfDate}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card">
-        <h3>Income &amp; expenses</h3>
-        <label>
-          Period
+        <div className="card-header-row">
+          <h3>Income &amp; expenses</h3>
           <select value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
             <option value="this-month">This month</option>
             <option value="last-month">Last month</option>
             <option value="ytd">Year to date</option>
             <option value="all-time">All time</option>
           </select>
-        </label>
-        <p>
-          Income: {formatPence(incomeExpense.totalIncomePence, 'GBP')} &nbsp;·&nbsp; Expense:{' '}
-          {formatPence(incomeExpense.totalExpensePence, 'GBP')} &nbsp;·&nbsp; Net: {formatPence(incomeExpense.netPence, 'GBP')}
+        </div>
+        <div className="stat-grid">
+          <div className="stat-tile">
+            <p className="stat-tile-label">Income</p>
+            <p className="stat-tile-value positive">{formatPence(incomeExpense.totalIncomePence, 'GBP')}</p>
+          </div>
+          <div className="stat-tile">
+            <p className="stat-tile-label">Expense</p>
+            <p className="stat-tile-value negative">{formatPence(incomeExpense.totalExpensePence, 'GBP')}</p>
+          </div>
+          <div className="stat-tile">
+            <p className="stat-tile-label">Net</p>
+            <p className={`stat-tile-value ${incomeExpense.netPence >= 0 ? 'positive' : 'negative'}`}>
+              {formatPence(incomeExpense.netPence, 'GBP')}
+            </p>
+          </div>
+        </div>
+        <p className="muted" style={{ marginTop: 12 }}>
+          Confirmed transfers between your own accounts are excluded from these totals.
         </p>
-        <p className="muted">Confirmed transfers between your own accounts are excluded from these totals.</p>
       </div>
 
       <div className="card">
         <h3>Backup</h3>
         <div className="form-inline">
-          <button onClick={handleExport}>Export JSON backup</button>
-          <label className="file-button">
-            Import JSON backup
+          <button className="btn btn-primary" onClick={handleExport}>
+            <Download size={16} /> Export JSON backup
+          </button>
+          <label className="btn btn-ghost file-button">
+            <Upload size={16} /> Import JSON backup
             <input type="file" accept="application/json" onChange={handleImportFile} />
           </label>
         </div>

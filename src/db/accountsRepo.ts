@@ -1,6 +1,16 @@
 import { getDb } from './client';
 import { createId, nowIso } from '../domain/id';
-import type { Account, AccountType, BankId } from '../domain/types';
+import type { Account, AccountOwner, AccountType, BankId } from '../domain/types';
+
+/**
+ * Fills in defaults for fields added after some accounts were already
+ * persisted (e.g. `owners`, added for the household feature) — IndexedDB
+ * doesn't enforce a schema, so older records don't retroactively gain new
+ * fields on their own.
+ */
+export function normalizeAccount(account: Account): Account {
+  return { ...account, owners: account.owners ?? [] };
+}
 
 export interface CreateAccountInput {
   name: string;
@@ -9,6 +19,7 @@ export interface CreateAccountInput {
   currency: string;
   valuationBased: boolean;
   manualRateToGbp?: number | null;
+  owners: AccountOwner[];
 }
 
 export async function createAccount(input: CreateAccountInput): Promise<Account> {
@@ -20,6 +31,7 @@ export async function createAccount(input: CreateAccountInput): Promise<Account>
     currency: input.currency,
     valuationBased: input.valuationBased,
     manualRateToGbp: input.manualRateToGbp ?? null,
+    owners: input.owners,
     createdAt: nowIso(),
     archived: false,
   };
@@ -81,10 +93,12 @@ export async function deleteAccountCascade(accountId: string): Promise<void> {
 
 export async function listAccounts(): Promise<Account[]> {
   const db = await getDb();
-  return db.getAll('accounts');
+  const accounts = await db.getAll('accounts');
+  return accounts.map(normalizeAccount);
 }
 
 export async function getAccount(accountId: string): Promise<Account | undefined> {
   const db = await getDb();
-  return db.get('accounts', accountId);
+  const account = await db.get('accounts', accountId);
+  return account ? normalizeAccount(account) : undefined;
 }
