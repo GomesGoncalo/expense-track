@@ -28,6 +28,33 @@
   margin-bottom: 0;
 }
 
+.card-header-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.card-collapse-toggle:hover {
+  background: var(--accent-wash);
+  color: var(--text);
+}
+
+.card-collapse-toggle svg {
+  transition: transform var(--duration-fast) ease;
+}
+
 /* ---------- Buttons ---------- */
 .btn,
 button {
@@ -309,6 +336,9 @@ button:disabled {
   border-radius: var(--radius-full);
   font-size: 0.76rem;
   font-weight: 600;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
 }
 
 .chip button {

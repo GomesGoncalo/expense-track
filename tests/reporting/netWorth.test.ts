@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeLatestBalances,
+  computeNetWorthDrawdown,
   computeNetWorthSeries,
   computeNetWorthSummary,
 } from '../../src/reporting/netWorth';
+import type { NetWorthPoint } from '../../src/reporting/netWorth';
 import { createId, nowIso } from '../../src/domain/id';
 import type { Account, Transaction, ValuationSnapshot } from '../../src/domain/types';
 
@@ -164,5 +166,40 @@ describe('computeNetWorthSeries', () => {
 
   it('returns an empty series when there is no data', () => {
     expect(computeNetWorthSeries([makeAccount()], [], [], 'day')).toEqual([]);
+  });
+});
+
+function makePoint(date: string, totalGbpPence: number): NetWorthPoint {
+  return { date, totalGbpPence, perAccountPence: {}, perAccountGbpPence: {} };
+}
+
+describe('computeNetWorthDrawdown', () => {
+  it('reports no drawdown when the latest point is the all-time high', () => {
+    const series = [makePoint('2026-01-01', 1000), makePoint('2026-02-01', 2000)];
+    const result = computeNetWorthDrawdown(series);
+    expect(result?.peakGbpPence).toBe(2000);
+    expect(result?.currentGbpPence).toBe(2000);
+    expect(result?.drawdownPence).toBe(0);
+    expect(result?.drawdownPercent).toBe(0);
+  });
+
+  it('reports a negative drawdown when below the historical peak', () => {
+    const series = [makePoint('2026-01-01', 1000), makePoint('2026-02-01', 2000), makePoint('2026-03-01', 1500)];
+    const result = computeNetWorthDrawdown(series);
+    expect(result?.peakGbpPence).toBe(2000);
+    expect(result?.peakDate).toBe('2026-02-01');
+    expect(result?.currentGbpPence).toBe(1500);
+    expect(result?.drawdownPence).toBe(-500);
+    expect(result?.drawdownPercent).toBeCloseTo(-25, 5);
+  });
+
+  it('returns null drawdownPercent when the peak is not positive', () => {
+    const series = [makePoint('2026-01-01', -500)];
+    const result = computeNetWorthDrawdown(series);
+    expect(result?.drawdownPercent).toBeNull();
+  });
+
+  it('returns null for an empty series', () => {
+    expect(computeNetWorthDrawdown([])).toBeNull();
   });
 });

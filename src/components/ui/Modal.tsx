@@ -23,6 +23,12 @@ export function Modal({ open, onClose, title, children, footer, size = 'sm' }: M
 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        // Without preventDefault, a fullscreen browser window treats Escape
+        // as "exit fullscreen" first (its own default action) in addition
+        // to closing this dialog — so closing the modal unexpectedly kicks
+        // the whole window out of fullscreen too.
+        e.preventDefault();
+        e.stopPropagation();
         onClose();
         return;
       }

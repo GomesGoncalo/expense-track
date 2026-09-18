@@ -1,12 +1,26 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Landmark, Upload, ArrowLeftRight, Users, Wallet, Search, Plus, Tag } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Landmark,
+  Upload,
+  ArrowLeftRight,
+  Users,
+  Wallet,
+  Search,
+  Plus,
+  Tag,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { PrimaryNav, type NavItem } from './PrimaryNav';
 import { ThemeToggle } from './ThemeToggle';
 import { CommandBar } from '../command/CommandBar';
 import { QuickAddTransactionModal } from '../quickAdd/QuickAddTransactionModal';
 import { Button } from '../ui/Button';
+import { usePersistedState } from '../../utils/persistedState';
+import { cx } from '../../utils/cx';
 
 const NAV_ITEMS: readonly NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -17,13 +31,13 @@ const NAV_ITEMS: readonly NavItem[] = [
   { to: '/categories', label: 'Categories', icon: Tag, end: false },
 ];
 
-function Brand() {
+function Brand({ showLabel = true }: { showLabel?: boolean }) {
   return (
     <NavLink to="/" className="app-brand">
       <span className="brand-mark">
         <Wallet size={16} />
       </span>
-      Expense Track
+      {showLabel && 'Expense Track'}
     </NavLink>
   );
 }
@@ -32,6 +46,7 @@ export function AppShell() {
   const location = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersistedState('app.sidebarCollapsed', false);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -46,13 +61,22 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
-      <aside className="app-sidebar">
+      <aside className={cx('app-sidebar', sidebarCollapsed && 'collapsed')}>
         <div className="app-sidebar-top">
-          <Brand />
-          <PrimaryNav items={NAV_ITEMS} variant="sidebar" />
+          <Brand showLabel={!sidebarCollapsed} />
+          <PrimaryNav items={NAV_ITEMS} variant="sidebar" collapsed={sidebarCollapsed} />
         </div>
         <div className="app-sidebar-bottom">
-          <ThemeToggle />
+          <button
+            type="button"
+            className="sidebar-collapse-toggle"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            {!sidebarCollapsed && 'Collapse'}
+          </button>
+          <ThemeToggle collapsed={sidebarCollapsed} />
         </div>
       </aside>
 

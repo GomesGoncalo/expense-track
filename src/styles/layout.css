@@ -22,6 +22,12 @@
     padding: 20px 14px;
     border-right: 1px solid var(--border);
     background: var(--surface);
+    transition: width var(--duration-fast) ease;
+  }
+
+  .app-sidebar.collapsed {
+    width: var(--sidebar-width-collapsed);
+    padding: 20px 10px;
   }
 }
 
@@ -33,6 +39,11 @@
 
 .app-sidebar .app-brand {
   padding: 0 10px;
+}
+
+.app-sidebar.collapsed .app-brand {
+  justify-content: center;
+  padding: 0;
 }
 
 .sidebar-nav {
@@ -54,6 +65,11 @@
   transition: background var(--duration-fast) ease, color var(--duration-fast) ease;
 }
 
+.app-sidebar.collapsed .sidebar-nav a {
+  justify-content: center;
+  padding: 9px 0;
+}
+
 .sidebar-nav a:hover {
   background: var(--accent-wash);
   color: var(--text);
@@ -68,6 +84,31 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.sidebar-collapse-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, color var(--duration-fast) ease;
+}
+
+.app-sidebar.collapsed .sidebar-collapse-toggle {
+  justify-content: center;
+  padding: 9px 0;
+}
+
+.sidebar-collapse-toggle:hover {
+  background: var(--accent-wash);
+  color: var(--text);
 }
 
 /* ---------- Top bar (mobile brand + search + quick-add) ---------- */
@@ -161,8 +202,6 @@
 .app-main {
   flex: 1;
   width: 100%;
-  max-width: 1040px;
-  margin: 0 auto;
   padding: 24px 20px 40px;
 }
 

@@ -18,6 +18,7 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  Activity,
   ArrowLeftRight,
   ArrowRight,
   BarChart3,
@@ -38,7 +39,9 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore } from '../state/store';
-import { computeNetWorthSeries, computeNetWorthSummary } from '../reporting/netWorth';
+import { computeNetWorthDrawdown, computeNetWorthSeries, computeNetWorthSummary } from '../reporting/netWorth';
+import { computeCashRunway } from '../reporting/cashRunway';
+import { computeSpendPace } from '../reporting/spendPace';
 import { computeIncomeExpenseSeries, computeIncomeExpenseSummary } from '../reporting/incomeExpense';
 import {
   computeCategorySpendingSeries,
@@ -104,6 +107,8 @@ export function DashboardPage() {
     [],
   );
   const excludedNetWorthAccounts = useMemo(() => new Set(excludedNetWorthAccountsList), [excludedNetWorthAccountsList]);
+  const [collapsedCardsList, setCollapsedCardsList] = usePersistedState<string[]>('dashboard.collapsedCards', []);
+  const collapsedCards = useMemo(() => new Set(collapsedCardsList), [collapsedCardsList]);
   const [drilldownCategory, setDrilldownCategory] = useState<string | null>(null);
   const scheme = useColorScheme();
   const navigate = useNavigate();
@@ -123,6 +128,19 @@ export function DashboardPage() {
         ? excludedNetWorthAccountsList.filter((id) => id !== accountId)
         : [...excludedNetWorthAccountsList, accountId],
     );
+  }
+
+  /** Spread onto a Card to make it collapsible, with state persisted per-viewer. */
+  function cardCollapseProps(cardId: string) {
+    return {
+      collapsed: collapsedCards.has(cardId),
+      onCollapsedChange: () =>
+        setCollapsedCardsList(
+          collapsedCardsList.includes(cardId)
+            ? collapsedCardsList.filter((id) => id !== cardId)
+            : [...collapsedCardsList, cardId],
+        ),
+    };
   }
 
   function goToCategoryTransactions(category: string) {
@@ -152,6 +170,12 @@ export function DashboardPage() {
     () => computeNetWorthSeries(accounts, transactions, valuationSnapshots, 'week'),
     [accounts, transactions, valuationSnapshots],
   );
+  const netWorthDrawdown = useMemo(() => computeNetWorthDrawdown(series), [series]);
+  const cashRunway = useMemo(
+    () => computeCashRunway(accounts, transactions, valuationSnapshots),
+    [accounts, transactions, valuationSnapshots],
+  );
+  const spendPace = useMemo(() => computeSpendPace(transactions), [transactions]);
   /** Fixed reference order so an account always gets the same chart color — see categoryColorOrderList above. */
   const netWorthAccountOrder = useMemo(
     () => [...accounts].filter((a) => !a.archived).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1)),
@@ -441,7 +465,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <Card title="Net worth" icon={<Wallet size={18} />}>
+      <Card title="Net worth" icon={<Wallet size={18} />} {...cardCollapseProps('net-worth')}>
         <p className="big-number">{formatPence(netWorth.combinedGbpTotalPence, 'GBP')}</p>
         {netWorth.subtotalsByCurrency.length > 1 && (
           <p className="muted">
@@ -457,7 +481,7 @@ export function DashboardPage() {
       </Card>
 
       {insights.length > 0 && (
-        <Card title="Insights" icon={<Sparkles size={18} />}>
+        <Card title="Insights" icon={<Sparkles size={18} />} {...cardCollapseProps('insights')}>
           <div className="insight-list">
             {insights.map((insight) => {
               const Icon = insight.tone === 'up' ? TrendingUp : insight.tone === 'down' ? TrendingDown : Sparkles;
@@ -483,7 +507,7 @@ export function DashboardPage() {
       )}
 
       {pendingTransferRows.length > 0 && (
-        <Card title="Pending transfers" icon={<ArrowLeftRight size={18} />}>
+        <Card title="Pending transfers" icon={<ArrowLeftRight size={18} />} {...cardCollapseProps('pending-transfers')}>
           <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
             Matched by amount and date across two of your accounts — confirm to exclude both legs from income/expense
             totals below, or reject if it isn't really a transfer.
@@ -492,7 +516,7 @@ export function DashboardPage() {
         </Card>
       )}
 
-      <Card title="Net worth over time" icon={<TrendingUp size={18} />}>
+      <Card title="Net worth over time" icon={<TrendingUp size={18} />} {...cardCollapseProps('net-worth-over-time')}>
         {netWorthChartData.length > 0 ? (
           <>
             <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
@@ -549,7 +573,50 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Accounts">
+      <Card title="Financial health" icon={<Activity size={18} />} {...cardCollapseProps('financial-health')}>
+        <div className="stat-grid">
+          <div className="stat-tile">
+            <p className="stat-tile-label">Cash runway</p>
+            {cashRunway ? (
+              <>
+                <p className="stat-tile-value">{cashRunway.runwayMonths.toFixed(1)} months</p>
+                <p className="muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>
+                  {formatPence(cashRunway.liquidCashGbpPence, 'GBP')} cash ÷ {formatPence(cashRunway.averageMonthlyExpensePence, 'GBP')}/mo avg spend
+                </p>
+              </>
+            ) : (
+              <p className="muted" style={{ marginTop: 4 }}>
+                Need more data — at least 3 completed months of expense history.
+              </p>
+            )}
+          </div>
+          {netWorthDrawdown && (
+            <div className="stat-tile">
+              <p className="stat-tile-label">Net worth vs. all-time high</p>
+              <p className={`stat-tile-value ${netWorthDrawdown.drawdownPence >= 0 ? 'positive' : 'negative'}`}>
+                {netWorthDrawdown.drawdownPence >= 0
+                  ? 'At an all-time high'
+                  : `${netWorthDrawdown.drawdownPercent?.toFixed(1)}% below peak`}
+              </p>
+              <p className="muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>
+                Peak {formatPence(netWorthDrawdown.peakGbpPence, 'GBP')} on {netWorthDrawdown.peakDate}
+              </p>
+            </div>
+          )}
+          {spendPace && (
+            <div className="stat-tile">
+              <p className="stat-tile-label">On track to spend this month</p>
+              <p className="stat-tile-value negative">{formatPence(spendPace.projectedSpendPence, 'GBP')}</p>
+              <p className="muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>
+                {formatPence(spendPace.spendSoFarPence, 'GBP')} so far — day {spendPace.daysElapsed} of{' '}
+                {spendPace.daysInMonth}
+              </p>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card title="Accounts" {...cardCollapseProps('accounts')}>
         <Table
           columns={accountBalanceColumns}
           rows={accountBalanceRows}
@@ -570,6 +637,7 @@ export function DashboardPage() {
             <option value="all-time">All time</option>
           </select>
         }
+        {...cardCollapseProps('income-expenses')}
       >
         <div className="stat-grid">
           <div className="stat-tile">
@@ -615,6 +683,7 @@ export function DashboardPage() {
               Net worth &amp; who-owes-whom <ArrowRight size={14} />
             </Button>
           }
+          {...cardCollapseProps('by-person')}
         >
           <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
             Split by each account's ownership share (or a transaction's manual split, when set), for the period above.
@@ -633,7 +702,11 @@ export function DashboardPage() {
         </Card>
       )}
 
-      <Card title="Spending by category (this period)" icon={<PieChart size={18} />}>
+      <Card
+        title="Spending by category (this period)"
+        icon={<PieChart size={18} />}
+        {...cardCollapseProps('spending-by-category')}
+      >
         {allCategoriesInPeriod.length > 0 && (
           <div className="chip-toggle-row">
             {allCategoriesInPeriod.map((c) => {
@@ -716,7 +789,7 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Top merchants (this period)" icon={<Store size={18} />}>
+      <Card title="Top merchants (this period)" icon={<Store size={18} />} {...cardCollapseProps('top-merchants')}>
         {topMerchantsChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={Math.max(160, topMerchantsChartData.length * 40)}>
             <BarChart data={topMerchantsChartData} layout="vertical" margin={{ left: 16 }}>
@@ -732,7 +805,11 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Biggest transactions (this period)" icon={<Receipt size={18} />}>
+      <Card
+        title="Biggest transactions (this period)"
+        icon={<Receipt size={18} />}
+        {...cardCollapseProps('biggest-transactions')}
+      >
         {biggestTransactions.length > 0 ? (
           <Table columns={biggestTransactionsColumns} rows={biggestTransactions} rowKey={(t) => t.id} />
         ) : (
@@ -740,7 +817,11 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Spending by day of week (this period)" icon={<CalendarDays size={18} />}>
+      <Card
+        title="Spending by day of week (this period)"
+        icon={<CalendarDays size={18} />}
+        {...cardCollapseProps('spending-by-weekday')}
+      >
         {weekdaySpendingData.some((d) => d.amount > 0) ? (
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={weekdaySpendingData}>
@@ -756,7 +837,11 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Spending by category, over time" icon={<Layers size={18} />}>
+      <Card
+        title="Spending by category, over time"
+        icon={<Layers size={18} />}
+        {...cardCollapseProps('spending-by-category-over-time')}
+      >
         {stackedCategoryData.length > 0 ? (
           <>
             <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
@@ -807,7 +892,7 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Recurring payments" icon={<Repeat size={18} />}>
+      <Card title="Recurring payments" icon={<Repeat size={18} />} {...cardCollapseProps('recurring-payments')}>
         {recurringPayments.length > 0 ? (
           <>
             <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
@@ -823,7 +908,7 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Cash flow over time" icon={<BarChart3 size={18} />}>
+      <Card title="Cash flow over time" icon={<BarChart3 size={18} />} {...cardCollapseProps('cash-flow-over-time')}>
         {cashFlowChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={cashFlowChartData}>
@@ -842,7 +927,7 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Savings rate" icon={<PiggyBank size={18} />}>
+      <Card title="Savings rate" icon={<PiggyBank size={18} />} {...cardCollapseProps('savings-rate')}>
         {savingsRateData.length > 0 ? (
           <>
             <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
@@ -868,7 +953,7 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Backup">
+      <Card title="Backup" {...cardCollapseProps('backup')}>
         <div className="form-inline">
           <Button icon={<Download size={16} />} onClick={handleExport}>
             Export JSON backup

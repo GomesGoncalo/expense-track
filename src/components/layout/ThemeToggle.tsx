@@ -20,7 +20,7 @@ const LABEL: Record<ThemePreference, string> = {
   dark: 'Dark theme',
 };
 
-export function ThemeToggle() {
+export function ThemeToggle({ collapsed = false }: { collapsed?: boolean }) {
   const preference = useThemeStore((s) => s.themePreference);
   const setPreference = useThemeStore((s) => s.setThemePreference);
   const Icon = ICON[preference];
@@ -34,7 +34,7 @@ export function ThemeToggle() {
       aria-label={`Theme: ${LABEL[preference]}. Click to switch.`}
       title={`Theme: ${LABEL[preference]}. Click to switch.`}
     >
-      {LABEL[preference]}
+      {!collapsed && LABEL[preference]}
     </Button>
   );
 }

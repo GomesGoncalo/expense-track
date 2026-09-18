@@ -206,3 +206,36 @@ export function computeNetWorthSeries(
 
   return Array.from(bucketed.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
 }
+
+export interface NetWorthDrawdown {
+  peakGbpPence: number;
+  peakDate: string;
+  currentGbpPence: number;
+  currentDate: string;
+  /** current - peak; zero at a new high, negative below it. */
+  drawdownPence: number;
+  /** Null when the peak is zero or negative — a percent off a non-positive peak isn't meaningful. */
+  drawdownPercent: number | null;
+}
+
+/**
+ * Current net worth against its all-time high within an existing
+ * computeNetWorthSeries result — every point already known, so this is
+ * just a max/latest lookup, not a forecast.
+ */
+export function computeNetWorthDrawdown(series: NetWorthPoint[]): NetWorthDrawdown | null {
+  if (series.length === 0) return null;
+
+  const peak = series.reduce((max, p) => (p.totalGbpPence > max.totalGbpPence ? p : max), series[0]);
+  const current = series[series.length - 1];
+  const drawdownPence = current.totalGbpPence - peak.totalGbpPence;
+
+  return {
+    peakGbpPence: peak.totalGbpPence,
+    peakDate: peak.date,
+    currentGbpPence: current.totalGbpPence,
+    currentDate: current.date,
+    drawdownPence,
+    drawdownPercent: peak.totalGbpPence > 0 ? (drawdownPence / peak.totalGbpPence) * 100 : null,
+  };
+}
