@@ -88,11 +88,36 @@ export function findHeaderRowIndexInLines(lines: TextLine[], config: HeaderLabel
   return null;
 }
 
+// A right-aligned numeric column header (e.g. "Amount") is sometimes printed
+// a few points off the other header labels' baseline (observed on a real
+// HSBC credit card statement — 623.5 vs 615.7, a 7.8pt gap) — just past the
+// normal line-clustering tolerance, so it ends up as its own line and would
+// otherwise be silently dropped from the header entirely, causing every row
+// to parse with no amount and zero transactions with no warning. Gated on
+// content (a candidate line must itself supply a role not already found),
+// not just proximity — a plain distance check would also swallow a real
+// first data row whenever it happens to sit within the tolerance (row
+// spacing can be tighter than this gap on some statements), since nothing
+// stops it being "nearby" too. A data row's cells don't match any label
+// text, so it never contributes a role and is safely never pulled in.
+const HEADER_MERGE_Y_TOLERANCE = 15;
+
 /**
  * Scans all pages for a line whose items match at least a date label and
  * one of (description/singleAmount/moneyOut) — treated as the header row —
- * then derives column x-boundaries from the header items' positions (each
- * column spans from its item's x to the midpoint before the next item).
+ * then derives column x-boundaries from ALL items on that line plus any
+ * other nearby line that supplies a role not already found (see
+ * HEADER_MERGE_Y_TOLERANCE above), each roled column spanning from the
+ * midpoint before it to the midpoint after it. Using every item on a
+ * contributing line (not just the ones that matched a role) matters when a
+ * statement has a column we deliberately don't map to any role — e.g. a
+ * credit card's "Received By Us" posting-date column sitting to the left
+ * of the "Transaction Date" one we actually use: without it as a boundary
+ * marker, the date column's left edge would default to -Infinity and
+ * silently swallow that unmapped column's data too. The very first item
+ * overall still gets -Infinity as its left edge when there's nothing
+ * before it, which is the common case (date usually is the leftmost
+ * column) and matches the previous behavior there.
  */
 export function findHeaderColumns(pages: TextLine[][], config: HeaderLabelConfig): HeaderLocation | null {
   for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
@@ -100,14 +125,48 @@ export function findHeaderColumns(pages: TextLine[][], config: HeaderLabelConfig
     const lineIndex = findHeaderRowIndexInLines(lines, config);
     if (lineIndex === null) continue;
 
-    const line = lines[lineIndex];
-    const sortedHits = [...headerRoleHits(line, config)].sort((a, b) => a.item.x - b.item.x);
-    const columns: HeaderColumn[] = sortedHits.map((hit, i) => {
-      const nextX = sortedHits[i + 1]?.item.x ?? Infinity;
-      const xStart = i === 0 ? -Infinity : hit.item.x - 4;
-      const xEnd = nextX === Infinity ? Infinity : (hit.item.x + nextX) / 2;
-      return { role: hit.role, xStart, xEnd };
-    });
+    const primaryLine = lines[lineIndex];
+    const primaryHits = headerRoleHits(primaryLine, config);
+    const foundRoles = new Set(primaryHits.map((h) => h.role));
+
+    const contributingLines = [primaryLine];
+    const allRoleHits = [...primaryHits];
+    for (const candidate of lines) {
+      if (candidate === primaryLine) continue;
+      if (Math.abs(candidate.y - primaryLine.y) > HEADER_MERGE_Y_TOLERANCE) continue;
+      // Only take hits for roles not already found. A merged-in line can
+      // carry a stray item that happens to ALSO substring-match an
+      // already-claimed role (e.g. a section title like "Your Transaction
+      // Details" matching the description label "details" just because it
+      // shares that word) — taking every hit on the line would plant a
+      // second, bogus column for that role, and textForRole only ever
+      // reads the first column matching a role, so the real one gets
+      // silently shadowed. The line is still added to contributingLines
+      // below either way, so its other items still act as boundary
+      // markers, same as an unmapped column like "Received By Us".
+      const candidateHits = headerRoleHits(candidate, config);
+      const newHits = candidateHits.filter((h) => !foundRoles.has(h.role));
+      if (newHits.length === 0) continue;
+      for (const h of newHits) foundRoles.add(h.role);
+      contributingLines.push(candidate);
+      allRoleHits.push(...newHits);
+    }
+
+    const allItemsSorted = contributingLines.flatMap((l) => l.items).sort((a, b) => a.x - b.x);
+    const roleByX = new Map(allRoleHits.map((h) => [h.item.x, h.role]));
+
+    const columns: HeaderColumn[] = [];
+    for (let i = 0; i < allItemsSorted.length; i += 1) {
+      const item = allItemsSorted[i];
+      const role = roleByX.get(item.x);
+      if (!role) continue; // an unmapped header cell — not a column we parse
+
+      const prevX = allItemsSorted[i - 1]?.x;
+      const nextX = allItemsSorted[i + 1]?.x ?? Infinity;
+      const xStart = prevX === undefined ? -Infinity : (prevX + item.x) / 2;
+      const xEnd = nextX === Infinity ? Infinity : (item.x + nextX) / 2;
+      columns.push({ role, xStart, xEnd });
+    }
 
     return { pageIndex, lineIndex, columns };
   }
@@ -127,6 +186,13 @@ export function textForRole(line: TextLine, columns: HeaderColumn[], role: Colum
 export interface ParseTableOptions {
   dateFormat: string;
   defaultCurrency: string;
+  /**
+   * Overrides how amount-column text becomes signed pence. Defaults to
+   * parseAmountToPence (an unmarked amount is positive/income, DR/D is
+   * negative/expense) — pass parseCreditCardAmountToPence for a credit
+   * card statement, where that convention is inverted.
+   */
+  amountParser?: (raw: string) => number;
 }
 
 export interface TableParseResult {
@@ -201,12 +267,19 @@ export function parseRowsFromColumns(
 
     // On pages after the first, re-locate this page's own repeated header
     // (statements often reprint the table header, and anything above it —
-    // e.g. a repeated account-details block — isn't transaction data).
+    // e.g. a repeated account-details block — isn't transaction data). A
+    // page with NO repeated header isn't a continuation of the transaction
+    // table at all — real statements always reprint it on a continuation
+    // page — so skip that page entirely rather than falling back to
+    // scanning it from the top: without this, a trailing T&Cs/disclosure
+    // page (no header, and nothing to trigger the balance-carried-forward
+    // stop check either, since it's not transaction data) gets scanned
+    // start to finish, and stray numbers in it (e.g. numbered-list markers
+    // like "1." next to an unrelated price) get misread as transactions.
     if (pageIndex !== startPageIndex && headerConfig) {
       const repeatedHeaderIndex = findHeaderRowIndexInLines(lines, headerConfig);
-      if (repeatedHeaderIndex !== null) {
-        startLine = repeatedHeaderIndex + 1;
-      }
+      if (repeatedHeaderIndex === null) continue;
+      startLine = repeatedHeaderIndex + 1;
     }
 
     for (let lineIndex = startLine; lineIndex < lines.length; lineIndex += 1) {
@@ -248,14 +321,15 @@ export function parseRowsFromColumns(
       const balanceText = textForRole(line, columns, 'balance');
       const currencyText = textForRole(line, columns, 'currency');
 
+      const parseAmount = options.amountParser ?? parseAmountToPence;
       let amountPence: number | null = null;
       try {
         if (singleAmountText) {
-          amountPence = parseAmountToPence(singleAmountText);
+          amountPence = parseAmount(singleAmountText);
         } else if (moneyOutText) {
-          amountPence = -Math.abs(parseAmountToPence(moneyOutText));
+          amountPence = -Math.abs(parseAmount(moneyOutText));
         } else if (moneyInText) {
-          amountPence = Math.abs(parseAmountToPence(moneyInText));
+          amountPence = Math.abs(parseAmount(moneyInText));
         }
       } catch {
         amountPence = null;

@@ -34,6 +34,20 @@ export function getCategoricalColor(index: number, isDark: boolean): string {
   return palette[index % palette.length];
 }
 
+/**
+ * Stable color for a named category (transaction category, not a person) —
+ * keyed by position in a fixed reference order rather than by rank in
+ * whatever data happens to be on screen, so a category is always the same
+ * color across renders/filters ("color follows the entity, never its
+ * rank"). `referenceOrder` should be the full fixed category list (plus
+ * synthetic buckets like 'Uncategorized'/'Other' appended) — callers own
+ * building that list once, not per-render.
+ */
+export function getNamedCategoryColor(name: string, referenceOrder: readonly string[], isDark: boolean): string {
+  const index = referenceOrder.indexOf(name);
+  return getCategoricalColor(index === -1 ? 0 : index, isDark);
+}
+
 /** Tracks the viewer's OS color scheme so chart colors can pick the right palette step. */
 export function useColorScheme(): 'light' | 'dark' {
   const [scheme, setScheme] = useState<'light' | 'dark'>(() =>

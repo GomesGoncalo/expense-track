@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ArrowLeftRight, Sparkles, Users } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import * as transfersRepo from '../db/transfersRepo';
@@ -80,8 +81,9 @@ function SplitDialog({
 
 export function TransactionsPage() {
   const { accounts, persons, transactions, transfers, refresh } = useAppStore();
+  const [searchParams] = useSearchParams();
   const [accountFilter, setAccountFilter] = useState<string>('all');
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>(() => searchParams.get('category') ?? 'all');
   const [search, setSearch] = useState('');
   const [selectedForLink, setSelectedForLink] = useState<string[]>([]);
   const [splittingTransaction, setSplittingTransaction] = useState<Transaction | null>(null);

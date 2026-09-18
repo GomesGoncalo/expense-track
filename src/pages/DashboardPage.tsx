@@ -1,17 +1,29 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { BarChart3, Download, PieChart, TrendingUp, Upload, Wallet } from 'lucide-react';
+import { ArrowRight, BarChart3, Download, Layers, PieChart, TrendingUp, Upload, Wallet, X } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import { computeNetWorthSeries, computeNetWorthSummary } from '../reporting/netWorth';
 import { computeIncomeExpenseSeries, computeIncomeExpenseSummary } from '../reporting/incomeExpense';
-import { computeSpendingByCategory } from '../reporting/byCategory';
+import {
+  computeCategorySpendingSeries,
+  computeCategorySpendingSeriesForAll,
+  computeSpendingByCategory,
+  UNCATEGORIZED,
+} from '../reporting/byCategory';
+import { CATEGORIES } from '../domain/categories';
 import { exportBackup, downloadBackup, readBackupFile, importBackup } from '../db/backup';
 import { formatPence } from '../utils/currency';
 import { todayIsoDate } from '../utils/dates';
-import { getCategoricalColor, useColorScheme } from '../utils/palette';
+import { getNamedCategoryColor, useColorScheme, getCategoricalColor } from '../utils/palette';
+import { usePersistedState } from '../utils/persistedState';
 import { EmptyState } from '../components/common/EmptyState';
 import type { ImportMode } from '../db/backup';
+
+const OTHER_BUCKET = 'Other';
+/** Fixed reference order so a category always gets the same chart color, regardless of current data/sort order. */
+const CATEGORY_COLOR_ORDER = [...CATEGORIES, UNCATEGORIZED, OTHER_BUCKET];
 
 type Period = 'this-month' | 'last-month' | 'ytd' | 'all-time';
 
@@ -38,8 +50,30 @@ export function DashboardPage() {
   const { accounts, transactions, valuationSnapshots, refresh } = useAppStore();
   const [period, setPeriod] = useState<Period>('this-month');
   const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [excludedCategoriesList, setExcludedCategoriesList] = usePersistedState<string[]>(
+    'dashboard.excludedCategories',
+    [],
+  );
+  const excludedCategories = useMemo(() => new Set(excludedCategoriesList), [excludedCategoriesList]);
+  const [drilldownCategory, setDrilldownCategory] = useState<string | null>(null);
   const scheme = useColorScheme();
   const accentColor = getCategoricalColor(0, scheme === 'dark');
+  const navigate = useNavigate();
+
+  function toggleExcludedCategory(category: string) {
+    setExcludedCategoriesList(
+      excludedCategoriesList.includes(category)
+        ? excludedCategoriesList.filter((c) => c !== category)
+        : [...excludedCategoriesList, category],
+    );
+  }
+
+  function goToCategoryTransactions(category: string) {
+    // TransactionsPage's filter uses the literal 'uncategorized' token for
+    // "no category set", distinct from the display label 'Uncategorized'.
+    const value = category === UNCATEGORIZED ? 'uncategorized' : category;
+    navigate(`/transactions?category=${encodeURIComponent(value)}`);
+  }
 
   const netWorth = useMemo(
     () => computeNetWorthSummary(accounts, transactions, valuationSnapshots),
@@ -51,15 +85,60 @@ export function DashboardPage() {
   );
   const { start, end } = periodRange(period);
   const incomeExpense = useMemo(() => computeIncomeExpenseSummary(transactions, start, end), [transactions, start, end]);
-  const spendingByCategory = useMemo(() => computeSpendingByCategory(transactions, start, end), [transactions, start, end]);
+  const allCategoriesInPeriod = useMemo(() => computeSpendingByCategory(transactions, start, end), [transactions, start, end]);
+  const spendingByCategory = useMemo(
+    () => computeSpendingByCategory(transactions, start, end, excludedCategories),
+    [transactions, start, end, excludedCategories],
+  );
   const spendingChartData = useMemo(() => {
     const top = spendingByCategory.slice(0, 7);
     const rest = spendingByCategory.slice(7);
     const restTotal = rest.reduce((sum, c) => sum + c.expensePence, 0);
     const rows = top.map((c) => ({ category: c.category, amount: c.expensePence / 100 }));
-    if (restTotal > 0) rows.push({ category: 'Other', amount: restTotal / 100 });
+    if (restTotal > 0) rows.push({ category: 'Other (multiple categories)', amount: restTotal / 100 });
     return rows;
   }, [spendingByCategory]);
+  const drilldownSeries = useMemo(
+    () =>
+      drilldownCategory
+        ? computeCategorySpendingSeries(transactions, drilldownCategory === UNCATEGORIZED ? null : drilldownCategory, 'month')
+        : [],
+    [transactions, drilldownCategory],
+  );
+  const drilldownChartData = drilldownSeries.map((p) => ({ period: p.period.slice(0, 7), amount: p.expensePence / 100 }));
+
+  // Unfiltered on purpose: the top-7+Other bucket set and the legend stay
+  // stable as categories are toggled — toggling a legend entry just stops
+  // rendering that one Bar (see stackedCategoryKeys.filter below), rather
+  // than recomputing which categories even make the top 7.
+  const categoryTimeSeries = useMemo(() => computeCategorySpendingSeriesForAll(transactions, 'month'), [transactions]);
+  const { stackedCategoryData, stackedCategoryKeys } = useMemo(() => {
+    const totalsByCategory = new Map<string, number>();
+    for (const point of categoryTimeSeries) {
+      for (const [category, pence] of Object.entries(point.byCategory)) {
+        totalsByCategory.set(category, (totalsByCategory.get(category) ?? 0) + pence);
+      }
+    }
+    const topCategories = Array.from(totalsByCategory.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 7)
+      .map(([category]) => category);
+    const topSet = new Set(topCategories);
+    const hasOther = Array.from(totalsByCategory.keys()).some((c) => !topSet.has(c));
+    const keys = hasOther ? [...topCategories, OTHER_BUCKET] : topCategories;
+
+    const data = categoryTimeSeries.map((point) => {
+      const row: Record<string, string | number> = { period: point.period.slice(0, 7) };
+      for (const key of keys) row[key] = 0;
+      for (const [category, pence] of Object.entries(point.byCategory)) {
+        const key = topSet.has(category) ? category : OTHER_BUCKET;
+        row[key] = (Number(row[key]) || 0) + pence / 100;
+      }
+      return row;
+    });
+
+    return { stackedCategoryData: data, stackedCategoryKeys: keys };
+  }, [categoryTimeSeries]);
   const cashFlowSeries = useMemo(() => computeIncomeExpenseSeries(transactions, 'month'), [transactions]);
   const cashFlowChartData = cashFlowSeries.map((p) => ({
     period: p.period.slice(0, 7),
@@ -206,18 +285,139 @@ export function DashboardPage() {
         <h3>
           <PieChart size={18} /> Spending by category (this period)
         </h3>
+        {allCategoriesInPeriod.length > 0 && (
+          <div className="chip-toggle-row">
+            {allCategoriesInPeriod.map((c) => {
+              const isExcluded = excludedCategories.has(c.category);
+              return (
+                <button
+                  key={c.category}
+                  className={isExcluded ? 'chip chip-outline chip-muted' : 'chip chip-outline'}
+                  onClick={() => toggleExcludedCategory(c.category)}
+                  title={isExcluded ? 'Excluded — click to include' : 'Click to exclude from the chart below'}
+                >
+                  {isExcluded ? <X size={11} /> : null}
+                  {c.category}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {spendingChartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={Math.max(160, spendingChartData.length * 40)}>
-            <BarChart data={spendingChartData} layout="vertical" margin={{ left: 16 }}>
-              <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
-              <XAxis type="number" tickFormatter={(v) => formatPence(v * 100, 'GBP')} tick={{ fontSize: 12 }} />
-              <YAxis type="category" dataKey="category" width={130} tick={{ fontSize: 12 }} />
-              <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
-              <Bar dataKey="amount" fill="var(--negative)" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <>
+            <p className="muted" style={{ marginTop: 4, marginBottom: 4 }}>
+              Click a bar to see that category's trend and transactions.
+            </p>
+            <ResponsiveContainer width="100%" height={Math.max(160, spendingChartData.length * 40)}>
+              <BarChart data={spendingChartData} layout="vertical" margin={{ left: 16 }}>
+                <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+                <XAxis type="number" tickFormatter={(v) => formatPence(v * 100, 'GBP')} tick={{ fontSize: 12 }} />
+                <YAxis type="category" dataKey="category" width={130} tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
+                <Bar
+                  dataKey="amount"
+                  fill="var(--negative)"
+                  radius={[0, 4, 4, 0]}
+                  cursor="pointer"
+                  onClick={(data) => {
+                    const category = (data.payload as { category: string } | undefined)?.category;
+                    if (!category || category.startsWith('Other (')) return;
+                    setDrilldownCategory(category);
+                  }}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </>
         ) : (
-          <EmptyState title="No spending yet" description="Import a statement to see where your money is going." />
+          <EmptyState
+            title="No spending yet"
+            description={
+              allCategoriesInPeriod.length > 0
+                ? 'Every category for this period is excluded above.'
+                : 'Import a statement to see where your money is going.'
+            }
+          />
+        )}
+
+        {drilldownCategory && (
+          <div className="drilldown-panel">
+            <div className="card-header-row">
+              <h4>{drilldownCategory} over time</h4>
+              <button className="btn btn-ghost btn-sm" onClick={() => setDrilldownCategory(null)}>
+                <X size={14} /> Close
+              </button>
+            </div>
+            {drilldownChartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={drilldownChartData}>
+                  <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+                  <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                  <YAxis tickFormatter={(v) => formatPence(v * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
+                  <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
+                  <Bar dataKey="amount" fill="var(--negative)" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="muted">No spending in this category yet.</p>
+            )}
+            <button className="btn btn-ghost" onClick={() => goToCategoryTransactions(drilldownCategory)}>
+              View transactions <ArrowRight size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>
+          <Layers size={18} /> Spending by category, over time
+        </h3>
+        {stackedCategoryData.length > 0 ? (
+          <>
+            <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
+              Click a label to toggle that category off the chart.
+            </p>
+            <div className="chip-toggle-row">
+              {stackedCategoryKeys.map((key) => {
+                const isExcluded = excludedCategories.has(key);
+                const isToggleable = key !== OTHER_BUCKET;
+                return (
+                  <button
+                    key={key}
+                    className={isExcluded ? 'chip chip-outline chip-muted' : 'chip chip-outline'}
+                    onClick={() => isToggleable && toggleExcludedCategory(key)}
+                    disabled={!isToggleable}
+                    title={isToggleable ? (isExcluded ? 'Click to show' : 'Click to hide') : undefined}
+                  >
+                    <span
+                      className="color-dot"
+                      style={{ background: getNamedCategoryColor(key, CATEGORY_COLOR_ORDER, scheme === 'dark') }}
+                    />
+                    {key}
+                  </button>
+                );
+              })}
+            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={stackedCategoryData}>
+                <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <YAxis tickFormatter={(v) => formatPence(v * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
+                {stackedCategoryKeys
+                  .filter((key) => !excludedCategories.has(key))
+                  .map((key) => (
+                    <Bar
+                      key={key}
+                      dataKey={key}
+                      stackId="spend-by-category"
+                      fill={getNamedCategoryColor(key, CATEGORY_COLOR_ORDER, scheme === 'dark')}
+                    />
+                  ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </>
+        ) : (
+          <EmptyState title="No spending yet" description="Import a statement to see category spending build up over time." />
         )}
       </div>
 

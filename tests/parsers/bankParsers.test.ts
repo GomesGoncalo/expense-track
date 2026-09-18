@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FirstDirectParser } from '../../src/parsers/firstdirect/FirstDirectParser';
 import { HsbcParser } from '../../src/parsers/hsbc/HsbcParser';
+import { HsbcCreditCardParser } from '../../src/parsers/hsbc/HsbcCreditCardParser';
 import { MonzoParser } from '../../src/parsers/monzo/MonzoParser';
 import { RevolutParser } from '../../src/parsers/revolut/RevolutParser';
 import { VanguardParser } from '../../src/parsers/vanguard/VanguardParser';
@@ -52,9 +53,32 @@ const singleAmountPages: TextLine[][] = [
   ],
 ];
 
+const creditCardPages: TextLine[][] = [
+  [
+    line(100, [
+      { str: 'Received By Us', x: 0 },
+      { str: 'Transaction Date', x: 90 },
+      { str: 'Details', x: 180 },
+      { str: 'Amount', x: 400 },
+    ]),
+    line(90, [
+      { str: '22 Jul 26', x: 0 },
+      { str: '21 Jul 26', x: 90 },
+      { str: 'SOME MERCHANT', x: 180 },
+      { str: '5.30', x: 400 },
+    ]),
+  ],
+];
+
 describe.each([
   { parser: FirstDirectParser, name: 'First Direct', pages: dualColumnPages, mentionText: 'FIRST DIRECT statement' },
   { parser: HsbcParser, name: 'HSBC', pages: dualColumnPages, mentionText: 'HSBC UK Bank plc' },
+  {
+    parser: HsbcCreditCardParser,
+    name: 'HSBC Credit Card',
+    pages: creditCardPages,
+    mentionText: 'Your HSBC Premier Credit Card Statement',
+  },
   { parser: MonzoParser, name: 'Monzo', pages: singleAmountPages, mentionText: 'Monzo Bank Ltd' },
   { parser: RevolutParser, name: 'Revolut', pages: singleAmountPages, mentionText: 'Revolut Ltd' },
   { parser: VanguardParser, name: 'Vanguard', pages: singleAmountPages, mentionText: 'Vanguard Asset Management' },

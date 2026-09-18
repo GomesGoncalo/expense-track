@@ -4,7 +4,7 @@ import { useAppStore } from '../state/store';
 import { extractPdfLines, joinPageLines } from '../parsers/pdfText';
 import type { TextLine, DetectedColumn } from '../parsers/pdfText';
 import { computeTextHash } from '../domain/hash';
-import { getParserForBank, BANK_LABELS } from '../parsers';
+import { getParserForAccount, BANK_LABELS } from '../parsers';
 import { ParserError } from '../parsers/BankParser';
 import type { ParsedTransactionRow } from '../parsers/BankParser';
 import { detectColumnsForMapping, parseWithMapping } from '../parsers/manualMapping/ColumnMapper';
@@ -73,7 +73,7 @@ export function ImportPage() {
       const hash = await computeTextHash(joinPageLines(extractedPages));
       setRawTextHash(hash);
 
-      const parser = getParserForBank(account.bank);
+      const parser = getParserForAccount(account.bank, account.accountType);
       if (!parser.detect(joinPageLines(extractedPages), extractedPages)) {
         setWarnings([`This file doesn't look like a ${BANK_LABELS[account.bank]} statement — check you picked the right account.`]);
       }
