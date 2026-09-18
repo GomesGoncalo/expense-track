@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getDb } from '../../src/db/client';
 import * as accountsRepo from '../../src/db/accountsRepo';
+import * as categoriesRepo from '../../src/db/categoriesRepo';
 import * as transactionsRepo from '../../src/db/transactionsRepo';
 import { exportBackup, importBackup, readBackupFile } from '../../src/db/backup';
 import { createId, nowIso } from '../../src/domain/id';
@@ -14,6 +15,7 @@ async function clearAllStores() {
   await db.clear('transactions');
   await db.clear('transfers');
   await db.clear('valuationSnapshots');
+  await db.clear('categories');
 }
 
 beforeEach(async () => {
@@ -91,9 +93,35 @@ describe('backup export/import round-trip', () => {
   });
 
   it('rejects a backup with an unsupported schema version', async () => {
-    const bogus = { schemaVersion: 999, persons: [], accounts: [], statementImports: [], transactions: [], transfers: [], valuationSnapshots: [] };
+    const bogus = {
+      schemaVersion: 999,
+      persons: [],
+      accounts: [],
+      statementImports: [],
+      transactions: [],
+      transfers: [],
+      valuationSnapshots: [],
+      categories: [],
+    };
     // @ts-expect-error intentionally malformed for the test
     await expect(importBackup(bogus, 'replace')).rejects.toThrow(/schema version/i);
+  });
+
+  it('round-trips custom categories through export/import replace', async () => {
+    await categoriesRepo.createCategory('Pet Care');
+
+    const backup = await exportBackup();
+    expect(backup.categories).toHaveLength(1);
+
+    await clearAllStores();
+    expect(await categoriesRepo.listCategories()).toHaveLength(0);
+
+    const summary = await importBackup(backup, 'replace');
+    expect(summary.categoriesAdded).toBe(1);
+
+    const restored = await categoriesRepo.listCategories();
+    expect(restored).toHaveLength(1);
+    expect(restored[0].name).toBe('Pet Care');
   });
 
   it('readBackupFile parses and validates a File', async () => {

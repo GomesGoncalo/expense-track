@@ -11,6 +11,10 @@ import { detectColumnsForMapping, parseWithMapping } from '../parsers/manualMapp
 import { commitImport } from '../import/commitImport';
 import { formatPence } from '../utils/currency';
 import { ownerSummary } from '../utils/ownerSummary';
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { Table, type TableColumn } from '../components/ui/Table';
+import { useToast } from '../components/ui/Toast';
 import type { ColumnMapping } from '../domain/types';
 
 type Stage = 'select' | 'mapping' | 'preview' | 'done';
@@ -21,10 +25,18 @@ interface EditableRow extends ParsedTransactionRow {
 
 const DATE_FORMAT_OPTIONS = ['dd/MM/yyyy', 'dd MMM yyyy', 'dd MMM yy', 'dd/MM/yy', 'yyyy-MM-dd'];
 
+const STAGE_LABEL: Record<Stage, string> = {
+  select: 'Step 1 of 3 — Select a statement',
+  mapping: 'Step 2 of 3 — Map the columns',
+  preview: 'Step 2 of 3 — Review before committing',
+  done: 'Done',
+};
+
 export function ImportPage() {
   const { accounts, persons, refresh } = useAppStore();
   const activeAccounts = accounts.filter((a) => !a.archived);
   const personsById = new Map(persons.map((p) => [p.id, p]));
+  const { show } = useToast();
 
   // Not initialized from activeAccounts[0] directly: accounts load asynchronously
   // from IndexedDB after mount, so that value would often still be empty here.
@@ -38,6 +50,7 @@ export function ImportPage() {
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [period, setPeriod] = useState<{ start: string | null; end: string | null }>({ start: null, end: null });
+  const [endingValuation, setEndingValuation] = useState<{ date: string; valuePence: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [detectedColumns, setDetectedColumns] = useState<DetectedColumn[]>([]);
   const [mapping, setMapping] = useState<ColumnMapping>({
@@ -56,10 +69,17 @@ export function ImportPage() {
   const effectiveAccountId = accountId || (activeAccounts[0]?.id ?? '');
   const account = activeAccounts.find((a) => a.id === effectiveAccountId);
 
-  function applyParseResult(transactions: ParsedTransactionRow[], w: string[], start: string | null, end: string | null) {
+  function applyParseResult(
+    transactions: ParsedTransactionRow[],
+    w: string[],
+    start: string | null,
+    end: string | null,
+    valuation: { date: string; valuePence: number } | null = null,
+  ) {
     setRows(transactions.map((t) => ({ ...t, include: true })));
     setWarnings(w);
     setPeriod({ start, end });
+    setEndingValuation(valuation);
     setStage('preview');
   }
 
@@ -80,7 +100,13 @@ export function ImportPage() {
 
       try {
         const result = parser.parse(extractedPages);
-        applyParseResult(result.transactions, result.warnings, result.statementPeriodStart, result.statementPeriodEnd);
+        applyParseResult(
+          result.transactions,
+          result.warnings,
+          result.statementPeriodStart,
+          result.statementPeriodEnd,
+          result.endingValuation ?? null,
+        );
       } catch (err) {
         if (err instanceof ParserError) {
           setDetectedColumns(detectColumnsForMapping(extractedPages));
@@ -90,7 +116,9 @@ export function ImportPage() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to read this PDF.');
+      const message = err instanceof Error ? err.message : 'Failed to read this PDF.';
+      setError(message);
+      show({ tone: 'error', message });
     } finally {
       setBusy(false);
     }
@@ -120,6 +148,7 @@ export function ImportPage() {
         statementPeriodEnd: period.end,
         columnMappingUsed: stage === 'mapping' ? mapping : null,
         rows: included,
+        endingValuation,
       });
       setSummary(
         `Imported ${result.transactionsInserted} transaction(s), skipped ${result.transactionsSkippedDuplicate} duplicate(s). ` +
@@ -127,6 +156,8 @@ export function ImportPage() {
       );
       setStage('done');
       await refresh();
+    } catch (err) {
+      show({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to commit this import.' });
     } finally {
       setBusy(false);
     }
@@ -139,7 +170,42 @@ export function ImportPage() {
     setWarnings([]);
     setError(null);
     setSummary(null);
+    setEndingValuation(null);
   }
+
+  const previewColumns: TableColumn<EditableRow>[] = [
+    {
+      key: 'include',
+      header: '',
+      render: (row, i) => (
+        <input type="checkbox" checked={row.include} onChange={(e) => updateRow(i, { include: e.target.checked })} />
+      ),
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      render: (row, i) => <input value={row.date} onChange={(e) => updateRow(i, { date: e.target.value })} />,
+    },
+    {
+      key: 'description',
+      header: 'Description',
+      render: (row, i) => (
+        <input value={row.description} onChange={(e) => updateRow(i, { description: e.target.value })} className="wide" />
+      ),
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: (row) => <span className={row.amountPence < 0 ? 'negative' : 'positive'}>{formatPence(row.amountPence, row.currency)}</span>,
+    },
+    {
+      key: 'balance',
+      header: 'Balance',
+      align: 'right',
+      render: (row) => (row.balancePence !== null ? formatPence(row.balancePence, row.currency) : '—'),
+    },
+  ];
 
   return (
     <div className="page">
@@ -150,7 +216,9 @@ export function ImportPage() {
         </div>
       </div>
 
-      <div className="card form-grid">
+      <p className="muted">{STAGE_LABEL[stage]}</p>
+
+      <Card className="form-grid">
         <label>
           Account
           <select value={effectiveAccountId} onChange={(e) => setAccountId(e.target.value)}>
@@ -165,15 +233,14 @@ export function ImportPage() {
           Statement PDF
           <input type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </label>
-        <button className="btn btn-primary" onClick={handleParse} disabled={!file || !account || busy}>
-          <FileUp size={16} /> {busy ? 'Reading…' : 'Parse statement'}
-        </button>
+        <Button icon={<FileUp size={16} />} onClick={handleParse} disabled={!file || !account} loading={busy}>
+          {busy ? 'Reading…' : 'Parse statement'}
+        </Button>
         {error && <p className="error">{error}</p>}
-      </div>
+      </Card>
 
       {stage === 'mapping' && (
-        <div className="card">
-          <h3>Couldn&apos;t auto-detect the table — map the columns</h3>
+        <Card title="Couldn't auto-detect the table — map the columns">
           <p className="muted">
             Detected columns: {detectedColumns.map((c, i) => `[${i}] ${c.sampleHeader ?? '(no header text)'}`).join('  ')}
           </p>
@@ -257,15 +324,12 @@ export function ImportPage() {
               </select>
             </label>
           </div>
-          <button className="btn btn-primary" onClick={applyMapping}>
-            Apply mapping
-          </button>
-        </div>
+          <Button onClick={applyMapping}>Apply mapping</Button>
+        </Card>
       )}
 
       {stage === 'preview' && (
-        <div className="card">
-          <h3>Review before committing</h3>
+        <Card title="Review before committing">
           {warnings.length > 0 && (
             <ul className="warnings">
               {warnings.map((w, i) => (
@@ -273,61 +337,56 @@ export function ImportPage() {
               ))}
             </ul>
           )}
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th></th>
-                  <th>Date</th>
-                  <th>Description</th>
-                  <th>Amount</th>
-                  <th>Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, i) => (
-                  <tr key={i} className={row.include ? '' : 'excluded'}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={row.include}
-                        onChange={(e) => updateRow(i, { include: e.target.checked })}
-                      />
-                    </td>
-                    <td>
-                      <input value={row.date} onChange={(e) => updateRow(i, { date: e.target.value })} />
-                    </td>
-                    <td>
-                      <input
-                        value={row.description}
-                        onChange={(e) => updateRow(i, { description: e.target.value })}
-                        className="wide"
-                      />
-                    </td>
-                    <td className={row.amountPence < 0 ? 'negative' : 'positive'}>
-                      {formatPence(row.amountPence, row.currency)}
-                    </td>
-                    <td>{row.balancePence !== null ? formatPence(row.balancePence, row.currency) : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <button className="btn btn-primary" onClick={handleCommit} disabled={busy} style={{ marginTop: 14 }}>
+          {account?.valuationBased && (
+            <p className="muted">
+              {endingValuation
+                ? `Account value on ${endingValuation.date}: ${formatPence(endingValuation.valuePence, account.currency)} — this will be recorded as the account's value.`
+                : "This statement didn't state an account total — this account's value won't be updated from this import."}
+            </p>
+          )}
+          <Table
+            columns={previewColumns}
+            rows={rows}
+            rowKey={(_, i) => String(i)}
+            rowClassName={(row) => (row.include ? undefined : 'excluded')}
+            renderCard={(row, i) => (
+              <>
+                <label>
+                  <span className="field-label">Include</span>
+                  <input type="checkbox" checked={row.include} onChange={(e) => updateRow(i, { include: e.target.checked })} />
+                </label>
+                <label>
+                  <span className="field-label">Date</span>
+                  <input value={row.date} onChange={(e) => updateRow(i, { date: e.target.value })} />
+                </label>
+                <label>
+                  <span className="field-label">Description</span>
+                  <input value={row.description} onChange={(e) => updateRow(i, { description: e.target.value })} />
+                </label>
+                <div className="record-card-row">
+                  <span className="record-card-secondary">Amount</span>
+                  <span className={row.amountPence < 0 ? 'negative' : 'positive'}>{formatPence(row.amountPence, row.currency)}</span>
+                </div>
+                <div className="record-card-row">
+                  <span className="record-card-secondary">Balance</span>
+                  <span>{row.balancePence !== null ? formatPence(row.balancePence, row.currency) : '—'}</span>
+                </div>
+              </>
+            )}
+          />
+          <Button onClick={handleCommit} loading={busy} style={{ marginTop: 14 }}>
             {busy ? 'Saving…' : `Commit ${rows.filter((r) => r.include).length} transaction(s)`}
-          </button>
-        </div>
+          </Button>
+        </Card>
       )}
 
       {stage === 'done' && (
-        <div className="card">
+        <Card>
           <p style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <CheckCircle2 size={20} className="positive" /> {summary}
           </p>
-          <button className="btn btn-primary" onClick={reset}>
-            Import another statement
-          </button>
-        </div>
+          <Button onClick={reset}>Import another statement</Button>
+        </Card>
       )}
     </div>
   );

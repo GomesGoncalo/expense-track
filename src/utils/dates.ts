@@ -38,3 +38,35 @@ export function daysBetween(isoDateA: string, isoDateB: string): number {
 export function todayIsoDate(): string {
   return format(new Date(), 'yyyy-MM-dd');
 }
+
+export type Period = 'this-month' | 'last-month' | 'ytd' | 'all-time';
+
+/**
+ * Resolves a coarse reporting period into an inclusive ISO date range.
+ * Anchored on today by default; pass `anchor` (e.g. the most recent
+ * transaction date) to resolve "this month"/"last month" relative to where
+ * the data actually is, since statements are imported in batches rather
+ * than live — anchoring on wall-clock today would make "this month" empty
+ * for weeks after the last import.
+ */
+export function periodRange(period: Period, anchor: string = todayIsoDate()): { start: string; end: string } {
+  const today = anchor;
+  const [year, month] = today.split('-').map(Number);
+  if (period === 'this-month') {
+    return { start: `${year}-${String(month).padStart(2, '0')}-01`, end: today };
+  }
+  if (period === 'last-month') {
+    const lastMonthDate = new Date(year, month - 2, 1);
+    const y = lastMonthDate.getFullYear();
+    const m = lastMonthDate.getMonth() + 1;
+    const lastDay = new Date(y, m, 0).getDate();
+    return {
+      start: `${y}-${String(m).padStart(2, '0')}-01`,
+      end: `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
+    };
+  }
+  if (period === 'ytd') {
+    return { start: `${year}-01-01`, end: today };
+  }
+  return { start: '0000-01-01', end: today };
+}

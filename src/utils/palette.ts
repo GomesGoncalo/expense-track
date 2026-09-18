@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useThemeStore } from '../state/themeStore';
 
 /**
  * A CVD-safe, contrast-validated 8-color categorical palette (see the
@@ -48,18 +49,25 @@ export function getNamedCategoryColor(name: string, referenceOrder: readonly str
   return getCategoricalColor(index === -1 ? 0 : index, isDark);
 }
 
-/** Tracks the viewer's OS color scheme so chart colors can pick the right palette step. */
+/**
+ * Tracks the *effective* color scheme so chart colors can pick the right
+ * palette step. Resolves the user's manual light/dark/system choice
+ * (src/state/themeStore.ts) first, falling back to the OS preference only
+ * when they've chosen 'system' — kept in sync with the CSS, which reads the
+ * same store's `data-theme` attribute.
+ */
 export function useColorScheme(): 'light' | 'dark' {
-  const [scheme, setScheme] = useState<'light' | 'dark'>(() =>
+  const preference = useThemeStore((s) => s.themePreference);
+  const [systemScheme, setSystemScheme] = useState<'light' | 'dark'>(() =>
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
   );
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setScheme(e.matches ? 'dark' : 'light');
+    const handler = (e: MediaQueryListEvent) => setSystemScheme(e.matches ? 'dark' : 'light');
     media.addEventListener('change', handler);
     return () => media.removeEventListener('change', handler);
   }, []);
 
-  return scheme;
+  return preference === 'system' ? systemScheme : preference;
 }

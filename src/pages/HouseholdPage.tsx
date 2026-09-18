@@ -25,32 +25,21 @@ import {
   computeSplitBalances,
 } from '../reporting/byPerson';
 import { formatPence } from '../utils/currency';
-import { todayIsoDate } from '../utils/dates';
+import { periodRange } from '../utils/dates';
+import type { Period } from '../utils/dates';
 import { getCategoricalColor, useColorScheme } from '../utils/palette';
 import { EmptyState } from '../components/common/EmptyState';
-
-type Period = 'this-month' | 'last-month' | 'ytd' | 'all-time';
-
-function periodRange(period: Period): { start: string; end: string } {
-  const today = todayIsoDate();
-  const [year, month] = today.split('-').map(Number);
-  if (period === 'this-month') return { start: `${year}-${String(month).padStart(2, '0')}-01`, end: today };
-  if (period === 'last-month') {
-    const d = new Date(year, month - 2, 1);
-    const y = d.getFullYear();
-    const m = d.getMonth() + 1;
-    const lastDay = new Date(y, m, 0).getDate();
-    return { start: `${y}-${String(m).padStart(2, '0')}-01`, end: `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}` };
-  }
-  if (period === 'ytd') return { start: `${year}-01-01`, end: today };
-  return { start: '0000-01-01', end: today };
-}
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { useToast } from '../components/ui/Toast';
 
 function PersonForm({ onCreated }: { onCreated: () => void }) {
   const persons = useAppStore((s) => s.persons);
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { show } = useToast();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -61,6 +50,7 @@ function PersonForm({ onCreated }: { onCreated: () => void }) {
       await personsRepo.createPerson(name.trim(), persons.length);
       setName('');
       onCreated();
+      show({ tone: 'success', message: 'Household member added.' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add person.');
     } finally {
@@ -71,9 +61,9 @@ function PersonForm({ onCreated }: { onCreated: () => void }) {
   return (
     <form className="inline-form" onSubmit={handleSubmit}>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Add a household member…" />
-      <button type="submit" className="btn btn-primary" disabled={submitting}>
-        <Plus size={16} /> Add
-      </button>
+      <Button type="submit" icon={<Plus size={16} />} loading={submitting}>
+        Add
+      </Button>
       {error && <p className="error">{error}</p>}
     </form>
   );
@@ -128,17 +118,21 @@ export function HouseholdPage() {
     return row;
   });
 
+  const [pendingDeletePerson, setPendingDeletePerson] = useState<{ id: string; name: string } | null>(null);
+  const { show } = useToast();
+
   async function handleArchivePerson(personId: string) {
     await personsRepo.archivePerson(personId);
     await refresh();
+    show({ tone: 'success', message: 'Household member archived.' });
   }
 
-  async function handleDeletePerson(personId: string, name: string) {
-    if (!confirm(`Remove "${name}"? Any accounts they jointly own will have their remaining owners' shares rebalanced to 100%.`)) {
-      return;
-    }
-    await personsRepo.deletePersonCascade(personId);
+  async function handleDeletePerson() {
+    if (!pendingDeletePerson) return;
+    await personsRepo.deletePersonCascade(pendingDeletePerson.id);
     await refresh();
+    show({ tone: 'success', message: `"${pendingDeletePerson.name}" removed.` });
+    setPendingDeletePerson(null);
   }
 
   return (
@@ -150,10 +144,7 @@ export function HouseholdPage() {
         </div>
       </div>
 
-      <section className="card">
-        <h3>
-          <Users size={18} /> People
-        </h3>
+      <Card title="People" icon={<Users size={18} />}>
         <PersonForm onCreated={refresh} />
         {activePersons.length === 0 ? (
           <EmptyState
@@ -168,26 +159,25 @@ export function HouseholdPage() {
                 <span className="color-dot" style={{ background: colorFor(p.colorIndex) }} />
                 <span className="person-name">{p.name}</span>
                 <span className="spacer" />
-                <button className="btn btn-ghost btn-icon" onClick={() => handleArchivePerson(p.id)} title="Archive">
+                <Button variant="ghost" size="sm" onClick={() => handleArchivePerson(p.id)} title="Archive">
                   Archive
-                </button>
-                <button
-                  className="btn btn-ghost btn-icon danger"
-                  onClick={() => handleDeletePerson(p.id, p.name)}
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  icon={<Trash2 size={16} />}
+                  onClick={() => setPendingDeletePerson({ id: p.id, name: p.name })}
                   title="Remove"
-                >
-                  <Trash2 size={16} />
-                </button>
+                />
               </li>
             ))}
           </ul>
         )}
-      </section>
+      </Card>
 
       {activePersons.length === 0 ? null : (
         <>
-          <section className="card">
-            <h3>Net worth by person</h3>
+          <Card title="Net worth by person">
             <div className="compare-grid">
               {comparisonRows.map((row) => (
                 <div key={row.person.id} className="compare-tile">
@@ -202,10 +192,9 @@ export function HouseholdPage() {
                 {formatPence(netWorth.unassignedGbpPence, 'GBP')} is held in accounts with no assigned owner.
               </p>
             )}
-          </section>
+          </Card>
 
-          <section className="card">
-            <h3>Net worth over time by person</h3>
+          <Card title="Net worth over time by person">
             <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
               Stacked — the top of the shaded area is the household total; each band is one person's share of it.
             </p>
@@ -233,12 +222,9 @@ export function HouseholdPage() {
             ) : (
               <EmptyState title="No data yet" description="Import statements for each person's accounts to see this chart." />
             )}
-          </section>
+          </Card>
 
-          <section className="card">
-            <h3>
-              <Activity size={18} /> Net cash flow by person, over time
-            </h3>
+          <Card title="Net cash flow by person, over time" icon={<Activity size={18} />}>
             <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
               Income minus expense each month, per person (split-aware) — above the line means saving, below means
               spending more than they brought in.
@@ -267,18 +253,19 @@ export function HouseholdPage() {
             ) : (
               <EmptyState title="No data yet" description="Import statements for each person's accounts to see this chart." />
             )}
-          </section>
+          </Card>
 
-          <section className="card">
-            <div className="card-header-row">
-              <h3>Income &amp; expenses by person (this period)</h3>
+          <Card
+            title={<>Income &amp; expenses by person (this period)</>}
+            headerActions={
               <select value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
                 <option value="this-month">This month</option>
                 <option value="last-month">Last month</option>
                 <option value="ytd">Year to date</option>
                 <option value="all-time">All time</option>
               </select>
-            </div>
+            }
+          >
             <ResponsiveContainer width="100%" height={Math.max(140, comparisonRows.length * 70)}>
               <BarChart
                 data={comparisonRows.map((r) => ({ name: r.person.name, Income: r.income / 100, Expense: r.expense / 100 }))}
@@ -294,12 +281,9 @@ export function HouseholdPage() {
                 <Bar dataKey="Expense" fill="var(--negative)" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          </section>
+          </Card>
 
-          <section className="card">
-            <h3>
-              <Scale size={18} /> Balances
-            </h3>
+          <Card title="Balances" icon={<Scale size={18} />}>
             {balances.every((b) => b.netOwedGbpPence === 0) ? (
               <EmptyState
                 title="Nothing owed"
@@ -328,9 +312,19 @@ export function HouseholdPage() {
                   })}
               </ul>
             )}
-          </section>
+          </Card>
         </>
       )}
+
+      <ConfirmDialog
+        open={pendingDeletePerson !== null}
+        title={pendingDeletePerson ? `Remove "${pendingDeletePerson.name}"?` : ''}
+        description="Any accounts they jointly own will have their remaining owners' shares rebalanced to 100%."
+        confirmLabel="Remove"
+        tone="danger"
+        onConfirm={handleDeletePerson}
+        onCancel={() => setPendingDeletePerson(null)}
+      />
     </div>
   );
 }

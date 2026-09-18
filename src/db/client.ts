@@ -31,6 +31,9 @@ export function getDb(): Promise<IDBPDatabase<ExpenseTrackDB>> {
         if (oldVersion < 2) {
           db.createObjectStore('persons', { keyPath: 'id' });
         }
+        if (oldVersion < 3) {
+          db.createObjectStore('categories', { keyPath: 'id' });
+        }
       },
     });
   }

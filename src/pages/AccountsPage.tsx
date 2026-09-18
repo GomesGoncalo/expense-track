@@ -12,6 +12,12 @@ import { ownersSharesAreValid } from '../domain/owners';
 import { ownerSummary } from '../utils/ownerSummary';
 import { EmptyState } from '../components/common/EmptyState';
 import { OwnerPicker } from '../components/common/OwnerPicker';
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { Modal } from '../components/ui/Modal';
+import { Table, type TableColumn } from '../components/ui/Table';
+import { useToast } from '../components/ui/Toast';
 import type { Account, AccountOwner, AccountType, BankId, Person } from '../domain/types';
 
 const ACCOUNT_TYPES: AccountType[] = ['current', 'savings', 'credit-card', 'isa', 'investment', 'other'];
@@ -140,6 +146,7 @@ function AccountForm({ persons, onCreated }: { persons: Person[]; onCreated: () 
   const [fields, setFields] = useState<AccountFieldsValue>(EMPTY_ACCOUNT_FIELDS);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { show } = useToast();
 
   function patch(p: Partial<AccountFieldsValue>) {
     setFields((f) => ({ ...f, ...p }));
@@ -167,6 +174,7 @@ function AccountForm({ persons, onCreated }: { persons: Person[]; onCreated: () 
       });
       setFields(EMPTY_ACCOUNT_FIELDS);
       onCreated();
+      show({ tone: 'success', message: 'Account added.' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create account.');
     } finally {
@@ -175,14 +183,15 @@ function AccountForm({ persons, onCreated }: { persons: Person[]; onCreated: () 
   }
 
   return (
-    <form className="card form-grid" onSubmit={handleSubmit}>
-      <h3>Add account</h3>
-      <AccountFields persons={persons} value={fields} onChange={patch} />
-      <button type="submit" className="btn btn-primary" disabled={submitting}>
-        <Plus size={16} /> Add account
-      </button>
-      {error && <p className="error">{error}</p>}
-    </form>
+    <Card title="Add account" icon={<Plus size={16} />}>
+      <form className="form-grid" onSubmit={handleSubmit}>
+        <AccountFields persons={persons} value={fields} onChange={patch} />
+        <Button type="submit" icon={<Plus size={16} />} loading={submitting}>
+          Add account
+        </Button>
+        {error && <p className="error">{error}</p>}
+      </form>
+    </Card>
   );
 }
 
@@ -200,6 +209,7 @@ function EditAccountDialog({
   const [fields, setFields] = useState<AccountFieldsValue>(accountToFields(account));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { show } = useToast();
 
   function patch(p: Partial<AccountFieldsValue>) {
     setFields((f) => ({ ...f, ...p }));
@@ -227,6 +237,7 @@ function EditAccountDialog({
       });
       onSaved();
       onClose();
+      show({ tone: 'success', message: 'Account updated.' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save changes.');
     } finally {
@@ -235,62 +246,74 @@ function EditAccountDialog({
   }
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>Edit account</h3>
-        <div className="form-grid">
-          <AccountFields persons={persons} value={fields} onChange={patch} />
-        </div>
-        {error && <p className="error">{error}</p>}
-        <div className="dialog-actions">
-          <button className="btn btn-ghost" onClick={onClose}>
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit account"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
             Cancel
-          </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={submitting}>
+          </Button>
+          <Button onClick={handleSave} loading={submitting}>
             Save changes
-          </button>
-        </div>
+          </Button>
+        </>
+      }
+    >
+      <div className="form-grid">
+        <AccountFields persons={persons} value={fields} onChange={patch} />
       </div>
-    </div>
+      {error && <p className="error">{error}</p>}
+    </Modal>
   );
 }
 
 function UpdateValueDialog({ account, onClose, onSaved }: { account: Account; onClose: () => void; onSaved: () => void }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { show } = useToast();
 
   async function handleSave() {
     if (!value.trim()) return;
     setError(null);
+    setSubmitting(true);
     try {
       const pence = parseAmountToPence(value);
       await valuationSnapshotsRepo.addSnapshot(account.id, todayIsoDate(), pence, 'manual');
       onSaved();
       onClose();
+      show({ tone: 'success', message: 'Value updated.' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save value.');
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>Update current value — {account.name}</h3>
-        <label>
-          Current value ({account.currency})
-          <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="e.g. 12345.67" autoFocus />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <div className="dialog-actions">
-          <button className="btn btn-ghost" onClick={onClose}>
+    <Modal
+      open
+      onClose={onClose}
+      title={`Update current value — ${account.name}`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
             Cancel
-          </button>
-          <button className="btn btn-primary" onClick={handleSave}>
+          </Button>
+          <Button onClick={handleSave} loading={submitting}>
             Save
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </>
+      }
+    >
+      <label>
+        Current value ({account.currency})
+        <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="e.g. 12345.67" autoFocus />
+      </label>
+      {error && <p className="error">{error}</p>}
+    </Modal>
   );
 }
 
@@ -300,19 +323,64 @@ export function AccountsPage() {
   const personsById = new Map(persons.map((p) => [p.id, p]));
   const [updatingValueFor, setUpdatingValueFor] = useState<Account | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Account | null>(null);
+  const { show } = useToast();
 
   async function handleArchive(id: string) {
     await accountsRepo.archiveAccount(id);
     await refresh();
+    show({ tone: 'success', message: 'Account archived.' });
   }
 
-  async function handleDelete(account: Account) {
-    if (!confirm(`Delete "${account.name}" and all its transactions, imports and transfers? This cannot be undone.`)) {
-      return;
-    }
-    await accountsRepo.deleteAccountCascade(account.id);
+  async function handleDelete() {
+    if (!pendingDelete) return;
+    await accountsRepo.deleteAccountCascade(pendingDelete.id);
     await refresh();
+    show({ tone: 'success', message: `"${pendingDelete.name}" deleted.` });
+    setPendingDelete(null);
   }
+
+  const columns: TableColumn<Account>[] = [
+    { key: 'name', header: 'Name', render: (a) => a.name },
+    { key: 'bank', header: 'Bank', render: (a) => BANK_LABELS[a.bank] },
+    {
+      key: 'type',
+      header: 'Type',
+      render: (a) => `${a.accountType}${a.valuationBased ? ' (valuation)' : ''}`,
+    },
+    {
+      key: 'currency',
+      header: 'Currency',
+      render: (a) =>
+        `${a.currency}${
+          a.currency !== 'GBP' && a.manualRateToGbp ? ` (${formatPence(Math.round(a.manualRateToGbp * 100), 'GBP')}/unit)` : ''
+        }`,
+    },
+    { key: 'owners', header: 'Owner(s)', render: (a) => ownerSummary(a.owners, personsById) },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      render: (account) => (
+        <div className="row-actions">
+          <Button variant="ghost" size="sm" icon={<Pencil size={14} />} onClick={() => setEditingAccount(account)}>
+            Edit
+          </Button>
+          {account.valuationBased && (
+            <Button variant="ghost" size="sm" onClick={() => setUpdatingValueFor(account)}>
+              Update value
+            </Button>
+          )}
+          {!account.archived && (
+            <Button variant="ghost" size="sm" onClick={() => handleArchive(account.id)}>
+              Archive
+            </Button>
+          )}
+          <Button variant="danger" size="sm" icon={<Trash2 size={14} />} onClick={() => setPendingDelete(account)} />
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="page">
@@ -325,68 +393,51 @@ export function AccountsPage() {
 
       <AccountForm persons={activePersons} onCreated={refresh} />
 
-      <div className="card">
-        <h3>Your accounts</h3>
-        {accounts.length === 0 ? (
-          <EmptyState
-            icon={<Landmark size={32} />}
-            title="No accounts yet"
-            description="Add your first account above, then head to Import to upload a statement."
-          />
-        ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Bank</th>
-                  <th>Type</th>
-                  <th>Currency</th>
-                  <th>Owner(s)</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {accounts.map((account) => (
-                  <tr key={account.id} className={account.archived ? 'archived' : ''}>
-                    <td>{account.name}</td>
-                    <td>{BANK_LABELS[account.bank]}</td>
-                    <td>
-                      {account.accountType}
-                      {account.valuationBased ? ' (valuation)' : ''}
-                    </td>
-                    <td>
-                      {account.currency}
-                      {account.currency !== 'GBP' && account.manualRateToGbp
-                        ? ` (${formatPence(Math.round(account.manualRateToGbp * 100), 'GBP')}/unit)`
-                        : ''}
-                    </td>
-                    <td>{ownerSummary(account.owners, personsById)}</td>
-                    <td className="row-actions">
-                      <button className="btn btn-ghost btn-sm" onClick={() => setEditingAccount(account)}>
-                        <Pencil size={14} /> Edit
-                      </button>
-                      {account.valuationBased && (
-                        <button className="btn btn-ghost btn-sm" onClick={() => setUpdatingValueFor(account)}>
-                          Update value
-                        </button>
-                      )}
-                      {!account.archived && (
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleArchive(account.id)}>
-                          Archive
-                        </button>
-                      )}
-                      <button className="btn btn-ghost btn-sm danger" onClick={() => handleDelete(account)}>
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <Card title="Your accounts">
+        <Table
+          columns={columns}
+          rows={accounts}
+          rowKey={(a) => a.id}
+          rowClassName={(a) => (a.archived ? 'archived' : undefined)}
+          emptyState={
+            <EmptyState
+              icon={<Landmark size={32} />}
+              title="No accounts yet"
+              description="Add your first account above, then head to Import to upload a statement."
+            />
+          }
+          renderCard={(account) => (
+            <>
+              <div className="record-card-row">
+                <span className="record-card-primary">{account.name}</span>
+              </div>
+              <span className="record-card-secondary">
+                {BANK_LABELS[account.bank]} · {account.accountType}
+                {account.valuationBased ? ' (valuation)' : ''}
+              </span>
+              <div className="record-card-meta">
+                <span className="muted">{ownerSummary(account.owners, personsById) || 'Unassigned'}</span>
+              </div>
+              <div className="record-card-actions">
+                <Button variant="ghost" size="sm" icon={<Pencil size={14} />} onClick={() => setEditingAccount(account)}>
+                  Edit
+                </Button>
+                {account.valuationBased && (
+                  <Button variant="ghost" size="sm" onClick={() => setUpdatingValueFor(account)}>
+                    Update value
+                  </Button>
+                )}
+                {!account.archived && (
+                  <Button variant="ghost" size="sm" onClick={() => handleArchive(account.id)}>
+                    Archive
+                  </Button>
+                )}
+                <Button variant="danger" size="sm" icon={<Trash2 size={14} />} onClick={() => setPendingDelete(account)} />
+              </div>
+            </>
+          )}
+        />
+      </Card>
 
       {updatingValueFor && (
         <UpdateValueDialog account={updatingValueFor} onClose={() => setUpdatingValueFor(null)} onSaved={refresh} />
@@ -399,7 +450,15 @@ export function AccountsPage() {
           onSaved={refresh}
         />
       )}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={pendingDelete ? `Delete "${pendingDelete.name}"?` : ''}
+        description="This deletes all of its transactions, imports and transfers. This cannot be undone."
+        confirmLabel="Delete"
+        tone="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }
-

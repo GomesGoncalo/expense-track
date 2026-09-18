@@ -1,16 +1,18 @@
 import { getDb } from './client';
 import * as accountsRepo from './accountsRepo';
+import * as categoriesRepo from './categoriesRepo';
 import * as personsRepo from './personsRepo';
 import * as statementImportsRepo from './statementImportsRepo';
 import * as transactionsRepo from './transactionsRepo';
 import * as transfersRepo from './transfersRepo';
 import * as valuationSnapshotsRepo from './valuationSnapshotsRepo';
+import type { CustomCategory } from '../domain/categories';
 import type { Account, Person, StatementImport, Transaction, Transfer, ValuationSnapshot } from '../domain/types';
 
-export const BACKUP_SCHEMA_VERSION = 2 as const;
+export const BACKUP_SCHEMA_VERSION = 3 as const;
 
 export interface BackupFileV1 {
-  schemaVersion: 2;
+  schemaVersion: 3;
   exportedAt: string;
   persons: Person[];
   accounts: Account[];
@@ -18,6 +20,7 @@ export interface BackupFileV1 {
   transactions: Transaction[];
   transfers: Transfer[];
   valuationSnapshots: ValuationSnapshot[];
+  categories: CustomCategory[];
 }
 
 export type ImportMode = 'replace' | 'merge';
@@ -30,17 +33,20 @@ export interface ImportSummary {
   statementImportsAdded: number;
   transfersAdded: number;
   valuationSnapshotsAdded: number;
+  categoriesAdded: number;
 }
 
 export async function exportBackup(): Promise<BackupFileV1> {
-  const [persons, accounts, statementImports, transactions, transfers, valuationSnapshots] = await Promise.all([
-    personsRepo.listPersons(),
-    accountsRepo.listAccounts(),
-    statementImportsRepo.listAll(),
-    transactionsRepo.listAll(),
-    transfersRepo.listAll(),
-    valuationSnapshotsRepo.listAll(),
-  ]);
+  const [persons, accounts, statementImports, transactions, transfers, valuationSnapshots, categories] =
+    await Promise.all([
+      personsRepo.listPersons(),
+      accountsRepo.listAccounts(),
+      statementImportsRepo.listAll(),
+      transactionsRepo.listAll(),
+      transfersRepo.listAll(),
+      valuationSnapshotsRepo.listAll(),
+      categoriesRepo.listCategories(),
+    ]);
   return {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
@@ -50,6 +56,7 @@ export async function exportBackup(): Promise<BackupFileV1> {
     transactions,
     transfers,
     valuationSnapshots,
+    categories,
   };
 }
 
@@ -81,6 +88,7 @@ function validateBackup(data: unknown): asserts data is BackupFileV1 {
     'transactions',
     'transfers',
     'valuationSnapshots',
+    'categories',
   ];
   for (const key of requiredArrays) {
     if (!Array.isArray(candidate[key])) {
@@ -108,9 +116,10 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
       db.clear('transactions'),
       db.clear('transfers'),
       db.clear('valuationSnapshots'),
+      db.clear('categories'),
     ]);
     const tx = db.transaction(
-      ['persons', 'accounts', 'statementImports', 'transactions', 'transfers', 'valuationSnapshots'],
+      ['persons', 'accounts', 'statementImports', 'transactions', 'transfers', 'valuationSnapshots', 'categories'],
       'readwrite',
     );
     for (const person of backup.persons) await tx.objectStore('persons').put(person);
@@ -121,6 +130,7 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
     for (const snapshot of backup.valuationSnapshots) {
       await tx.objectStore('valuationSnapshots').put(snapshot);
     }
+    for (const category of backup.categories) await tx.objectStore('categories').put(category);
     await tx.done;
 
     return {
@@ -131,6 +141,7 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
       statementImportsAdded: backup.statementImports.length,
       transfersAdded: backup.transfers.length,
       valuationSnapshotsAdded: backup.valuationSnapshots.length,
+      categoriesAdded: backup.categories.length,
     };
   }
 
@@ -143,6 +154,7 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
     statementImportsAdded: 0,
     transfersAdded: 0,
     valuationSnapshotsAdded: 0,
+    categoriesAdded: 0,
   };
 
   const existingPersonIds = new Set((await db.getAllKeys('persons')) as string[]);
@@ -190,6 +202,13 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
     if (existingSnapshotIds.has(snapshot.id)) continue;
     await db.put('valuationSnapshots', snapshot);
     summary.valuationSnapshotsAdded += 1;
+  }
+
+  const existingCategoryIds = new Set((await db.getAllKeys('categories')) as string[]);
+  for (const category of backup.categories) {
+    if (existingCategoryIds.has(category.id)) continue;
+    await db.put('categories', category);
+    summary.categoriesAdded += 1;
   }
 
   return summary;

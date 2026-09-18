@@ -2,7 +2,19 @@ import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowRight, BarChart3, Download, Layers, PieChart, TrendingUp, Upload, Wallet, X } from 'lucide-react';
+import {
+  ArrowRight,
+  BarChart3,
+  Download,
+  Layers,
+  PieChart,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+  Upload,
+  Wallet,
+  X,
+} from 'lucide-react';
 import { useAppStore } from '../state/store';
 import { computeNetWorthSeries, computeNetWorthSummary } from '../reporting/netWorth';
 import { computeIncomeExpenseSeries, computeIncomeExpenseSummary } from '../reporting/incomeExpense';
@@ -12,44 +24,38 @@ import {
   computeSpendingByCategory,
   UNCATEGORIZED,
 } from '../reporting/byCategory';
-import { CATEGORIES } from '../domain/categories';
+import { computeInsights } from '../reporting/insights';
+import { categoryColorOrder } from '../domain/categories';
 import { exportBackup, downloadBackup, readBackupFile, importBackup } from '../db/backup';
 import { formatPence } from '../utils/currency';
-import { todayIsoDate } from '../utils/dates';
+import { periodRange } from '../utils/dates';
+import type { Period } from '../utils/dates';
 import { getNamedCategoryColor, useColorScheme, getCategoricalColor } from '../utils/palette';
 import { usePersistedState } from '../utils/persistedState';
 import { EmptyState } from '../components/common/EmptyState';
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { Modal } from '../components/ui/Modal';
+import { SkeletonCard } from '../components/ui/Skeleton';
+import { Table, type TableColumn } from '../components/ui/Table';
+import { useToast } from '../components/ui/Toast';
 import type { ImportMode } from '../db/backup';
 
 const OTHER_BUCKET = 'Other';
-/** Fixed reference order so a category always gets the same chart color, regardless of current data/sort order. */
-const CATEGORY_COLOR_ORDER = [...CATEGORIES, UNCATEGORIZED, OTHER_BUCKET];
 
-type Period = 'this-month' | 'last-month' | 'ytd' | 'all-time';
-
-function periodRange(period: Period): { start: string; end: string } {
-  const today = todayIsoDate();
-  const [year, month] = today.split('-').map(Number);
-  if (period === 'this-month') {
-    return { start: `${year}-${String(month).padStart(2, '0')}-01`, end: today };
-  }
-  if (period === 'last-month') {
-    const lastMonthDate = new Date(year, month - 2, 1);
-    const y = lastMonthDate.getFullYear();
-    const m = lastMonthDate.getMonth() + 1;
-    const lastDay = new Date(y, m, 0).getDate();
-    return { start: `${y}-${String(m).padStart(2, '0')}-01`, end: `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}` };
-  }
-  if (period === 'ytd') {
-    return { start: `${year}-01-01`, end: today };
-  }
-  return { start: '0000-01-01', end: today };
+interface AccountBalanceRow {
+  accountId: string;
+  latestBalancePence: number;
+  currency: string;
+  asOfDate: string;
 }
 
 export function DashboardPage() {
-  const { accounts, transactions, valuationSnapshots, refresh } = useAppStore();
+  const { accounts, transactions, transfers, valuationSnapshots, categories, refresh, loaded } = useAppStore();
+  /** Fixed reference order so a category always gets the same chart color, regardless of current data/sort order. */
+  const categoryColorOrderList = useMemo(() => [...categoryColorOrder(categories), UNCATEGORIZED, OTHER_BUCKET], [categories]);
   const [period, setPeriod] = useState<Period>('this-month');
-  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [pendingBackupFile, setPendingBackupFile] = useState<File | null>(null);
   const [excludedCategoriesList, setExcludedCategoriesList] = usePersistedState<string[]>(
     'dashboard.excludedCategories',
     [],
@@ -59,6 +65,7 @@ export function DashboardPage() {
   const scheme = useColorScheme();
   const accentColor = getCategoricalColor(0, scheme === 'dark');
   const navigate = useNavigate();
+  const { show } = useToast();
 
   function toggleExcludedCategory(category: string) {
     setExcludedCategoriesList(
@@ -107,6 +114,8 @@ export function DashboardPage() {
   );
   const drilldownChartData = drilldownSeries.map((p) => ({ period: p.period.slice(0, 7), amount: p.expensePence / 100 }));
 
+  const insights = useMemo(() => computeInsights(transactions, transfers), [transactions, transfers]);
+
   // Unfiltered on purpose: the top-7+Other bucket set and the legend stay
   // stable as categories are toggled — toggling a legend entry just stops
   // rendering that one Bar (see stackedCategoryKeys.filter below), rather
@@ -151,30 +160,57 @@ export function DashboardPage() {
   async function handleExport() {
     const backup = await exportBackup();
     downloadBackup(backup);
+    show({ tone: 'success', message: 'Backup exported.' });
   }
 
-  async function handleImportFile(e: ChangeEvent<HTMLInputElement>) {
+  function handleImportFileSelected(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const mode: ImportMode = confirm('Replace all local data with this backup? Choose Cancel to merge instead.')
-      ? 'replace'
-      : 'merge';
+    setPendingBackupFile(file);
+  }
+
+  async function commitBackupImport(mode: ImportMode) {
+    const file = pendingBackupFile;
+    setPendingBackupFile(null);
+    if (!file) return;
     try {
       const backup = await readBackupFile(file);
       const summary = await importBackup(backup, mode);
-      setImportMessage(
-        `Imported: ${summary.personsAdded} person(s), ${summary.accountsAdded} account(s), ${summary.transactionsAdded} transaction(s) ` +
-          `(${summary.transactionsSkippedDuplicate} duplicate(s) skipped).`,
-      );
+      show({
+        tone: 'success',
+        message:
+          `Imported: ${summary.personsAdded} person(s), ${summary.accountsAdded} account(s), ` +
+          `${summary.transactionsAdded} transaction(s) (${summary.transactionsSkippedDuplicate} duplicate(s) skipped).`,
+      });
       await refresh();
     } catch (err) {
-      setImportMessage(err instanceof Error ? err.message : 'Failed to import backup file.');
-    } finally {
-      e.target.value = '';
+      show({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to import backup file.' });
     }
   }
 
-  const accountBalanceRows = netWorth.subtotalsByCurrency.flatMap((s) => s.accountBalances);
+  const accountBalanceRows: AccountBalanceRow[] = netWorth.subtotalsByCurrency.flatMap((s) => s.accountBalances);
+  const accountBalanceColumns: TableColumn<AccountBalanceRow>[] = [
+    { key: 'account', header: 'Account', render: (b) => accountsById.get(b.accountId)?.name ?? '—' },
+    { key: 'balance', header: 'Balance', render: (b) => formatPence(b.latestBalancePence, b.currency), align: 'right' },
+    { key: 'asOf', header: 'As of', render: (b) => b.asOfDate, align: 'right' },
+  ];
+
+  if (!loaded) {
+    return (
+      <div className="page">
+        <div className="page-header">
+          <div>
+            <h2>Dashboard</h2>
+            <p className="page-subtitle">Your overall net worth and cash flow, all in one place.</p>
+          </div>
+        </div>
+        <SkeletonCard lines={1} />
+        <SkeletonCard lines={4} />
+        <SkeletonCard lines={4} />
+      </div>
+    );
+  }
 
   return (
     <div className="page">
@@ -185,10 +221,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <div className="card">
-        <h3>
-          <Wallet size={18} /> Net worth
-        </h3>
+      <Card title="Net worth" icon={<Wallet size={18} />}>
         <p className="big-number">{formatPence(netWorth.combinedGbpTotalPence, 'GBP')}</p>
         {netWorth.subtotalsByCurrency.length > 1 && (
           <p className="muted">
@@ -201,12 +234,35 @@ export function DashboardPage() {
             them on the Accounts page.
           </p>
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <h3>
-          <TrendingUp size={18} /> Net worth over time
-        </h3>
+      {insights.length > 0 && (
+        <Card title="Insights" icon={<Sparkles size={18} />}>
+          <div className="insight-list">
+            {insights.map((insight) => {
+              const Icon = insight.tone === 'up' ? TrendingUp : insight.tone === 'down' ? TrendingDown : Sparkles;
+              const clickable = Boolean(insight.category) || Boolean(insight.to);
+              return (
+                <button
+                  key={insight.id}
+                  type="button"
+                  className="insight-row"
+                  disabled={!clickable}
+                  onClick={() => {
+                    if (insight.category) goToCategoryTransactions(insight.category);
+                    else if (insight.to) navigate(insight.to);
+                  }}
+                >
+                  <Icon size={16} className={`insight-icon ${insight.tone}`} />
+                  <span>{insight.message}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      <Card title="Net worth over time" icon={<TrendingUp size={18} />}>
         {series.length > 0 ? (
           <ResponsiveContainer width="100%" height={280}>
             <AreaChart data={series}>
@@ -220,46 +276,30 @@ export function DashboardPage() {
         ) : (
           <EmptyState title="No data yet" description="Import a statement to see your net worth trend here." />
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <h3>Accounts</h3>
-        {accountBalanceRows.length === 0 ? (
-          <EmptyState title="No account balances yet" description="Add an account and import a statement to get started." />
-        ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Balance</th>
-                  <th>As of</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accountBalanceRows.map((b) => (
-                  <tr key={b.accountId}>
-                    <td>{accountsById.get(b.accountId)?.name ?? '—'}</td>
-                    <td>{formatPence(b.latestBalancePence, b.currency)}</td>
-                    <td>{b.asOfDate}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <Card title="Accounts">
+        <Table
+          columns={accountBalanceColumns}
+          rows={accountBalanceRows}
+          rowKey={(b) => b.accountId}
+          emptyState={
+            <EmptyState title="No account balances yet" description="Add an account and import a statement to get started." />
+          }
+        />
+      </Card>
 
-      <div className="card">
-        <div className="card-header-row">
-          <h3>Income &amp; expenses</h3>
+      <Card
+        title="Income & expenses"
+        headerActions={
           <select value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
             <option value="this-month">This month</option>
             <option value="last-month">Last month</option>
             <option value="ytd">Year to date</option>
             <option value="all-time">All time</option>
           </select>
-        </div>
+        }
+      >
         <div className="stat-grid">
           <div className="stat-tile">
             <p className="stat-tile-label">Income</p>
@@ -279,12 +319,9 @@ export function DashboardPage() {
         <p className="muted" style={{ marginTop: 12 }}>
           Confirmed transfers between your own accounts are excluded from these totals.
         </p>
-      </div>
+      </Card>
 
-      <div className="card">
-        <h3>
-          <PieChart size={18} /> Spending by category (this period)
-        </h3>
+      <Card title="Spending by category (this period)" icon={<PieChart size={18} />}>
         {allCategoriesInPeriod.length > 0 && (
           <div className="chip-toggle-row">
             {allCategoriesInPeriod.map((c) => {
@@ -343,9 +380,9 @@ export function DashboardPage() {
           <div className="drilldown-panel">
             <div className="card-header-row">
               <h4>{drilldownCategory} over time</h4>
-              <button className="btn btn-ghost btn-sm" onClick={() => setDrilldownCategory(null)}>
-                <X size={14} /> Close
-              </button>
+              <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={() => setDrilldownCategory(null)}>
+                Close
+              </Button>
             </div>
             {drilldownChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
@@ -360,17 +397,14 @@ export function DashboardPage() {
             ) : (
               <p className="muted">No spending in this category yet.</p>
             )}
-            <button className="btn btn-ghost" onClick={() => goToCategoryTransactions(drilldownCategory)}>
+            <Button variant="ghost" onClick={() => goToCategoryTransactions(drilldownCategory)}>
               View transactions <ArrowRight size={14} />
-            </button>
+            </Button>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <h3>
-          <Layers size={18} /> Spending by category, over time
-        </h3>
+      <Card title="Spending by category, over time" icon={<Layers size={18} />}>
         {stackedCategoryData.length > 0 ? (
           <>
             <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
@@ -390,7 +424,7 @@ export function DashboardPage() {
                   >
                     <span
                       className="color-dot"
-                      style={{ background: getNamedCategoryColor(key, CATEGORY_COLOR_ORDER, scheme === 'dark') }}
+                      style={{ background: getNamedCategoryColor(key, categoryColorOrderList, scheme === 'dark') }}
                     />
                     {key}
                   </button>
@@ -410,7 +444,7 @@ export function DashboardPage() {
                       key={key}
                       dataKey={key}
                       stackId="spend-by-category"
-                      fill={getNamedCategoryColor(key, CATEGORY_COLOR_ORDER, scheme === 'dark')}
+                      fill={getNamedCategoryColor(key, categoryColorOrderList, scheme === 'dark')}
                     />
                   ))}
               </BarChart>
@@ -419,12 +453,9 @@ export function DashboardPage() {
         ) : (
           <EmptyState title="No spending yet" description="Import a statement to see category spending build up over time." />
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <h3>
-          <BarChart3 size={18} /> Cash flow over time
-        </h3>
+      <Card title="Cash flow over time" icon={<BarChart3 size={18} />}>
         {cashFlowChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={cashFlowChartData}>
@@ -440,21 +471,43 @@ export function DashboardPage() {
         ) : (
           <EmptyState title="No data yet" description="Import a statement to see income and expenses by month." />
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <h3>Backup</h3>
+      <Card title="Backup">
         <div className="form-inline">
-          <button className="btn btn-primary" onClick={handleExport}>
-            <Download size={16} /> Export JSON backup
-          </button>
+          <Button icon={<Download size={16} />} onClick={handleExport}>
+            Export JSON backup
+          </Button>
           <label className="btn btn-ghost file-button">
             <Upload size={16} /> Import JSON backup
-            <input type="file" accept="application/json" onChange={handleImportFile} />
+            <input type="file" accept="application/json" onChange={handleImportFileSelected} />
           </label>
         </div>
-        {importMessage && <p className="muted">{importMessage}</p>}
-      </div>
+      </Card>
+
+      <Modal
+        open={pendingBackupFile !== null}
+        onClose={() => setPendingBackupFile(null)}
+        title="Import backup"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPendingBackupFile(null)}>
+              Cancel
+            </Button>
+            <Button variant="ghost" onClick={() => commitBackupImport('merge')}>
+              Merge
+            </Button>
+            <Button variant="danger" onClick={() => commitBackupImport('replace')}>
+              Replace all data
+            </Button>
+          </>
+        }
+      >
+        <p className="muted">
+          Merge adds anything new from this backup alongside your existing data. Replace deletes everything currently
+          stored on this device first.
+        </p>
+      </Modal>
     </div>
   );
 }

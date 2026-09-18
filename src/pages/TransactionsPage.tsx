@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowLeftRight, Sparkles, Users } from 'lucide-react';
+import { ArrowLeftRight, Plus, Sparkles, Users } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import * as transfersRepo from '../db/transfersRepo';
 import * as transactionsRepo from '../db/transactionsRepo';
@@ -8,10 +8,17 @@ import { formatPence } from '../utils/currency';
 import { ownerSummary } from '../utils/ownerSummary';
 import { ownersSharesAreValid } from '../domain/owners';
 import { buildPriorCategoryLookup, resolveCategory } from '../domain/autoCategorize';
-import { CATEGORIES } from '../domain/categories';
+import { categoryColorOrder, selectableCategoryNames } from '../domain/categories';
 import type { Category } from '../domain/categories';
 import { EmptyState } from '../components/common/EmptyState';
 import { OwnerPicker } from '../components/common/OwnerPicker';
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { Modal } from '../components/ui/Modal';
+import { Table, type TableColumn } from '../components/ui/Table';
+import { useToast } from '../components/ui/Toast';
+import { QuickAddTransactionModal } from '../components/quickAdd/QuickAddTransactionModal';
+import { cx } from '../utils/cx';
 import type { AccountOwner, Person, Transaction } from '../domain/types';
 
 function SplitDialog({
@@ -28,6 +35,7 @@ function SplitDialog({
   const [owners, setOwners] = useState<AccountOwner[]>(transaction.splitOverride ?? []);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { show } = useToast();
 
   async function save(nextOwners: AccountOwner[] | null) {
     if (nextOwners && !ownersSharesAreValid(nextOwners)) {
@@ -40,6 +48,7 @@ function SplitDialog({
       await transactionsRepo.updateTransaction({ ...transaction, splitOverride: nextOwners });
       onSaved();
       onClose();
+      show({ tone: 'success', message: nextOwners ? 'Split saved.' : 'Split cleared.' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save split.');
     } finally {
@@ -48,46 +57,53 @@ function SplitDialog({
   }
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <h3>Split "{transaction.description}"</h3>
-        <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
-          Choose who this is shared between — doesn't have to be everyone. This updates income/expense and balance
-          reporting; it doesn't change who actually paid (the account's owner still shows on the row).
-        </p>
-        {persons.length === 0 ? (
-          <p className="muted">No household members yet — add some on the Household page first.</p>
-        ) : (
-          <OwnerPicker persons={persons} owners={owners} onChange={setOwners} />
-        )}
-        {error && <p className="error">{error}</p>}
-        <div className="dialog-actions">
+    <Modal
+      open
+      onClose={onClose}
+      title={`Split "${transaction.description}"`}
+      footer={
+        <>
           {transaction.splitOverride && (
-            <button className="btn btn-ghost danger" onClick={() => save(null)} disabled={submitting}>
+            <Button variant="danger" onClick={() => save(null)} disabled={submitting}>
               Clear split
-            </button>
+            </Button>
           )}
-          <button className="btn btn-ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
             Cancel
-          </button>
-          <button className="btn btn-primary" onClick={() => save(owners.length > 0 ? owners : null)} disabled={submitting}>
+          </Button>
+          <Button onClick={() => save(owners.length > 0 ? owners : null)} loading={submitting}>
             Save
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </>
+      }
+    >
+      <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
+        Choose who this is shared between — doesn't have to be everyone. This updates income/expense and balance
+        reporting; it doesn't change who actually paid (the account's owner still shows on the row).
+      </p>
+      {persons.length === 0 ? (
+        <p className="muted">No household members yet — add some on the Household page first.</p>
+      ) : (
+        <OwnerPicker persons={persons} owners={owners} onChange={setOwners} />
+      )}
+      {error && <p className="error">{error}</p>}
+    </Modal>
   );
 }
 
 export function TransactionsPage() {
-  const { accounts, persons, transactions, transfers, refresh } = useAppStore();
+  const { accounts, persons, transactions, transfers, categories, refresh } = useAppStore();
+  const categoryNames = useMemo(() => selectableCategoryNames(categories), [categories]);
+  const categoryFilterNames = useMemo(() => categoryColorOrder(categories), [categories]);
   const [searchParams] = useSearchParams();
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>(() => searchParams.get('category') ?? 'all');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [selectedForLink, setSelectedForLink] = useState<string[]>([]);
   const [splittingTransaction, setSplittingTransaction] = useState<Transaction | null>(null);
   const [autoCategorizing, setAutoCategorizing] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const { show } = useToast();
 
   const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const personsById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
@@ -114,11 +130,16 @@ export function TransactionsPage() {
     try {
       const priorCategories = buildPriorCategoryLookup(transactions);
       const uncategorized = transactions.filter((t) => !t.category);
+      let categorized = 0;
       for (const t of uncategorized) {
         const guessed = resolveCategory(t.description, t.amountPence, priorCategories);
-        if (guessed) await transactionsRepo.updateTransaction({ ...t, category: guessed });
+        if (guessed) {
+          await transactionsRepo.updateTransaction({ ...t, category: guessed });
+          categorized += 1;
+        }
       }
       await refresh();
+      show({ tone: 'success', message: `${categorized} transaction(s) categorized.` });
     } finally {
       setAutoCategorizing(false);
     }
@@ -127,16 +148,19 @@ export function TransactionsPage() {
   async function handleConfirm(transferId: string) {
     await transfersRepo.confirm(transferId);
     await refresh();
+    show({ tone: 'success', message: 'Transfer confirmed.' });
   }
 
   async function handleReject(transferId: string) {
     await transfersRepo.reject(transferId);
     await refresh();
+    show({ tone: 'success', message: 'Transfer suggestion rejected.' });
   }
 
   async function handleUnlink(transferId: string) {
     await transfersRepo.unlink(transferId);
     await refresh();
+    show({ tone: 'success', message: 'Transfer unlinked.' });
   }
 
   function toggleSelectForLink(id: string, amountPence: number) {
@@ -163,6 +187,7 @@ export function TransactionsPage() {
     await transfersRepo.createManual(outgoingId, incomingId);
     setSelectedForLink([]);
     await refresh();
+    show({ tone: 'success', message: 'Linked as a transfer.' });
   }
 
   function transferBadge(transaction: Transaction) {
@@ -224,6 +249,52 @@ export function TransactionsPage() {
     );
   }
 
+  function categorySelect(t: Transaction) {
+    return (
+      <select
+        className={cx(!t.category && 'category-unset')}
+        value={t.category ?? ''}
+        onChange={(e) => handleCategoryChange(t, e.target.value as Category | '')}
+      >
+        <option value="">Uncategorized</option>
+        {categoryNames.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  const columns: TableColumn<Transaction>[] = [
+    { key: 'date', header: 'Date', render: (t) => t.date },
+    { key: 'account', header: 'Account', render: (t) => accountsById.get(t.accountId)?.name ?? '—' },
+    {
+      key: 'owner',
+      header: 'Owner',
+      render: (t) => {
+        const account = accountsById.get(t.accountId);
+        return <span className="muted">{account ? ownerSummary(account.owners, personsById) : '—'}</span>;
+      },
+    },
+    { key: 'description', header: 'Description', render: (t) => t.description },
+    { key: 'category', header: 'Category', render: categorySelect },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: (t) => <span className={t.amountPence < 0 ? 'negative' : 'positive'}>{formatPence(t.amountPence, t.currency)}</span>,
+    },
+    {
+      key: 'balance',
+      header: 'Balance',
+      align: 'right',
+      render: (t) => (t.balancePence !== null ? formatPence(t.balancePence, t.currency) : '—'),
+    },
+    { key: 'transfer', header: 'Transfer', render: transferBadge },
+    { key: 'split', header: 'Split', render: splitControl },
+  ];
+
   return (
     <div className="page">
       <div className="page-header">
@@ -233,7 +304,7 @@ export function TransactionsPage() {
         </div>
       </div>
 
-      <div className="card form-grid form-inline">
+      <Card className="form-grid form-inline">
         <label>
           Account
           <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)}>
@@ -250,7 +321,7 @@ export function TransactionsPage() {
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="all">All categories</option>
             <option value="uncategorized">Uncategorized</option>
-            {CATEGORIES.map((c) => (
+            {categoryFilterNames.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
@@ -261,77 +332,52 @@ export function TransactionsPage() {
           Search description
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="e.g. Tesco" />
         </label>
+        <Button variant="ghost" icon={<Plus size={16} />} onClick={() => setQuickAddOpen(true)}>
+          Add transaction
+        </Button>
         {selectedForLink.length === 2 && (
-          <button className="btn btn-primary" onClick={handleManualLink}>
-            Link selected as transfer
-          </button>
+          <Button onClick={handleManualLink}>Link selected as transfer</Button>
         )}
         {uncategorizedCount > 0 && (
-          <button className="btn btn-ghost" onClick={handleAutoCategorize} disabled={autoCategorizing}>
-            <Sparkles size={16} />
+          <Button variant="ghost" icon={<Sparkles size={16} />} onClick={handleAutoCategorize} loading={autoCategorizing}>
             {autoCategorizing ? 'Categorizing…' : `Auto-categorize ${uncategorizedCount} uncategorized`}
-          </button>
+          </Button>
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        {filtered.length === 0 ? (
-          <EmptyState
-            icon={<ArrowLeftRight size={32} />}
-            title="No transactions match this filter"
-            description={transactions.length === 0 ? 'Import a statement to see transactions here.' : undefined}
-          />
-        ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Account</th>
-                  <th>Owner</th>
-                  <th>Description</th>
-                  <th>Category</th>
-                  <th>Amount</th>
-                  <th>Balance</th>
-                  <th>Transfer</th>
-                  <th>Split</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((t) => {
-                  const account = accountsById.get(t.accountId);
-                  return (
-                    <tr key={t.id}>
-                      <td>{t.date}</td>
-                      <td>{account?.name ?? '—'}</td>
-                      <td className="muted">{account ? ownerSummary(account.owners, personsById) : '—'}</td>
-                      <td>{t.description}</td>
-                      <td>
-                        <select
-                          className={t.category ? '' : 'category-unset'}
-                          value={t.category ?? ''}
-                          onChange={(e) => handleCategoryChange(t, e.target.value as Category | '')}
-                        >
-                          <option value="">Uncategorized</option>
-                          {CATEGORIES.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className={t.amountPence < 0 ? 'negative' : 'positive'}>{formatPence(t.amountPence, t.currency)}</td>
-                      <td>{t.balancePence !== null ? formatPence(t.balancePence, t.currency) : '—'}</td>
-                      <td>{transferBadge(t)}</td>
-                      <td>{splitControl(t)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <Card>
+        <Table
+          columns={columns}
+          rows={filtered}
+          rowKey={(t) => t.id}
+          emptyState={
+            <EmptyState
+              icon={<ArrowLeftRight size={32} />}
+              title="No transactions match this filter"
+              description={transactions.length === 0 ? 'Import a statement to see transactions here.' : undefined}
+            />
+          }
+          renderCard={(t) => {
+            const account = accountsById.get(t.accountId);
+            return (
+              <>
+                <div className="record-card-row">
+                  <span className="record-card-primary">{t.description}</span>
+                  <span className={t.amountPence < 0 ? 'negative' : 'positive'}>{formatPence(t.amountPence, t.currency)}</span>
+                </div>
+                <span className="record-card-secondary">
+                  {t.date} · {account?.name ?? '—'}
+                </span>
+                <div className="record-card-meta">{categorySelect(t)}</div>
+                <div className="record-card-meta">
+                  {transferBadge(t)}
+                  {splitControl(t)}
+                </div>
+              </>
+            );
+          }}
+        />
+      </Card>
 
       {splittingTransaction && (
         <SplitDialog
@@ -341,6 +387,12 @@ export function TransactionsPage() {
           onSaved={refresh}
         />
       )}
+
+      <QuickAddTransactionModal
+        open={quickAddOpen}
+        onClose={() => setQuickAddOpen(false)}
+        defaultAccountId={accountFilter !== 'all' ? accountFilter : undefined}
+      />
     </div>
   );
 }

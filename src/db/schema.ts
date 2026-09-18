@@ -1,4 +1,5 @@
 import type { DBSchema } from 'idb';
+import type { CustomCategory } from '../domain/categories';
 import type {
   Account,
   BankId,
@@ -14,6 +15,10 @@ export interface ExpenseTrackDB extends DBSchema {
   persons: {
     key: string;
     value: Person;
+  };
+  categories: {
+    key: string;
+    value: CustomCategory;
   };
   accounts: {
     key: string;
@@ -48,4 +53,4 @@ export interface ExpenseTrackDB extends DBSchema {
 }
 
 export const DB_NAME = 'expense-track';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;

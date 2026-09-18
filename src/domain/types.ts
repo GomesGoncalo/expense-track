@@ -3,6 +3,7 @@ import type { Category } from './categories';
 export type BankId =
   | 'first-direct'
   | 'hsbc'
+  | 'chase'
   | 'monzo'
   | 'revolut'
   | 'vanguard'
