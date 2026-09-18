@@ -21,3 +21,16 @@ export function evenSplit(personIds: string[]): AccountOwner[] {
     sharePercent: i === personIds.length - 1 ? 100 - share * (personIds.length - 1) : share,
   }));
 }
+
+/**
+ * Removes a person from an owners/split list, proportionally scaling the
+ * remaining shares back up to 100% (an empty result means "unassigned",
+ * not an error) — used when a person is deleted, for both Account.owners
+ * and Transaction.splitOverride.
+ */
+export function removeOwnerAndRenormalize(owners: AccountOwner[], personId: string): AccountOwner[] {
+  const remaining = owners.filter((o) => o.personId !== personId);
+  const remainingTotal = remaining.reduce((sum, o) => sum + o.sharePercent, 0);
+  if (remainingTotal <= 0) return [];
+  return remaining.map((o) => ({ personId: o.personId, sharePercent: (o.sharePercent / remainingTotal) * 100 }));
+}

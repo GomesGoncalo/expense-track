@@ -11,10 +11,15 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Plus, Trash2, Users } from 'lucide-react';
+import { Plus, Scale, Trash2, Users } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import * as personsRepo from '../db/personsRepo';
-import { computeHouseholdIncomeExpense, computeHouseholdNetWorth, computeHouseholdNetWorthSeries } from '../reporting/byPerson';
+import {
+  computeHouseholdIncomeExpense,
+  computeHouseholdNetWorth,
+  computeHouseholdNetWorthSeries,
+  computeSplitBalances,
+} from '../reporting/byPerson';
 import { formatPence } from '../utils/currency';
 import { todayIsoDate } from '../utils/dates';
 import { getCategoricalColor, useColorScheme } from '../utils/palette';
@@ -90,6 +95,8 @@ export function HouseholdPage() {
     () => computeHouseholdIncomeExpense(activePersons, accounts, transactions, start, end),
     [activePersons, accounts, transactions, start, end],
   );
+
+  const balances = useMemo(() => computeSplitBalances(activePersons, accounts, transactions), [activePersons, accounts, transactions]);
 
   const netWorthByPerson = useMemo(() => new Map(netWorth.perPerson.map((p) => [p.personId, p.netWorthGbpPence])), [netWorth]);
   const incomeExpenseByPerson = useMemo(() => new Map(incomeExpense.map((p) => [p.personId, p])), [incomeExpense]);
@@ -235,6 +242,40 @@ export function HouseholdPage() {
                 <Bar dataKey="Expense" fill="var(--negative)" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
+          </section>
+
+          <section className="card">
+            <h3>
+              <Scale size={18} /> Balances
+            </h3>
+            {balances.every((b) => b.netOwedGbpPence === 0) ? (
+              <EmptyState
+                title="Nothing owed"
+                description="Split a transaction on the Transactions page (e.g. a dinner one person paid for, or a refund that's partly someone else's) to see balances here."
+              />
+            ) : (
+              <ul className="person-list">
+                {balances
+                  .filter((b) => b.netOwedGbpPence !== 0)
+                  .sort((a, b) => b.netOwedGbpPence - a.netOwedGbpPence)
+                  .map((b) => {
+                    const person = activePersons.find((p) => p.id === b.personId);
+                    if (!person) return null;
+                    const isOwed = b.netOwedGbpPence > 0;
+                    return (
+                      <li key={b.personId} className="person-list-row">
+                        <span className="color-dot" style={{ background: colorFor(person.colorIndex) }} />
+                        <span className="person-name">{person.name}</span>
+                        <span className="spacer" />
+                        <span className={isOwed ? 'positive' : 'negative'}>
+                          {isOwed ? 'is owed ' : 'owes '}
+                          {formatPence(Math.abs(b.netOwedGbpPence), 'GBP')}
+                        </span>
+                      </li>
+                    );
+                  })}
+              </ul>
+            )}
           </section>
         </>
       )}

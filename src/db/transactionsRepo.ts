@@ -1,10 +1,21 @@
 import { getDb } from './client';
 import type { Transaction } from '../domain/types';
 
+/**
+ * Fills in defaults for fields added after some transactions were already
+ * persisted (e.g. `splitOverride`, added for per-transaction expense
+ * splitting) — IndexedDB doesn't enforce a schema, so older records don't
+ * retroactively gain new fields on their own.
+ */
+export function normalizeTransaction(transaction: Transaction): Transaction {
+  return { ...transaction, splitOverride: transaction.splitOverride ?? null };
+}
+
 export async function findByHash(accountId: string, dedupeHash: string): Promise<Transaction | undefined> {
   const db = await getDb();
   const candidates = await db.getAllFromIndex('transactions', 'by-dedupeHash', dedupeHash);
-  return candidates.find((t) => t.accountId === accountId);
+  const match = candidates.find((t) => t.accountId === accountId);
+  return match ? normalizeTransaction(match) : undefined;
 }
 
 export async function insertMany(transactions: Transaction[]): Promise<void> {
@@ -24,15 +35,18 @@ export async function updateTransaction(transaction: Transaction): Promise<void>
 
 export async function listByAccount(accountId: string): Promise<Transaction[]> {
   const db = await getDb();
-  return db.getAllFromIndex('transactions', 'by-account', accountId);
+  const transactions = await db.getAllFromIndex('transactions', 'by-account', accountId);
+  return transactions.map(normalizeTransaction);
 }
 
 export async function listAll(): Promise<Transaction[]> {
   const db = await getDb();
-  return db.getAll('transactions');
+  const transactions = await db.getAll('transactions');
+  return transactions.map(normalizeTransaction);
 }
 
 export async function getTransaction(id: string): Promise<Transaction | undefined> {
   const db = await getDb();
-  return db.get('transactions', id);
+  const transaction = await db.get('transactions', id);
+  return transaction ? normalizeTransaction(transaction) : undefined;
 }

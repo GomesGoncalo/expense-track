@@ -33,6 +33,7 @@ function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
     dedupeHash: createId(),
     transferId: null,
     category: null,
+    splitOverride: null,
     createdAt: nowIso(),
     ...overrides,
   };

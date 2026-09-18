@@ -1,5 +1,7 @@
 import { getDb } from './client';
 import { normalizeAccount } from './accountsRepo';
+import { normalizeTransaction } from './transactionsRepo';
+import { removeOwnerAndRenormalize } from '../domain/owners';
 import { createId, nowIso } from '../domain/id';
 import type { Person } from '../domain/types';
 
@@ -40,24 +42,27 @@ export async function getPerson(personId: string): Promise<Person | undefined> {
 }
 
 /**
- * Deletes a person and strips them from every account's owners list,
- * proportionally renormalizing the remaining owners' shares back to 100%
- * (an account left with no owners just becomes unassigned, not deleted).
+ * Deletes a person and strips them from every account's owners list and
+ * every transaction's split override, proportionally renormalizing the
+ * remaining shares back to 100% in each case (left with none just becomes
+ * unassigned, not deleted/rejected).
  */
 export async function deletePersonCascade(personId: string): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction(['persons', 'accounts'], 'readwrite');
+  const tx = db.transaction(['persons', 'accounts', 'transactions'], 'readwrite');
 
   const accounts = (await tx.objectStore('accounts').getAll()).map(normalizeAccount);
   for (const account of accounts) {
     if (!account.owners.some((o) => o.personId === personId)) continue;
-    const remaining = account.owners.filter((o) => o.personId !== personId);
-    const remainingTotal = remaining.reduce((sum, o) => sum + o.sharePercent, 0);
-    account.owners =
-      remainingTotal > 0
-        ? remaining.map((o) => ({ personId: o.personId, sharePercent: (o.sharePercent / remainingTotal) * 100 }))
-        : [];
+    account.owners = removeOwnerAndRenormalize(account.owners, personId);
     await tx.objectStore('accounts').put(account);
+  }
+
+  const transactions = (await tx.objectStore('transactions').getAll()).map(normalizeTransaction);
+  for (const transaction of transactions) {
+    if (!transaction.splitOverride?.some((o) => o.personId === personId)) continue;
+    transaction.splitOverride = removeOwnerAndRenormalize(transaction.splitOverride, personId);
+    await tx.objectStore('transactions').put(transaction);
   }
 
   await tx.objectStore('persons').delete(personId);

@@ -125,8 +125,11 @@ export interface PersonIncomeExpense {
 /**
  * Per-person income/expense for a period, in GBP: each non-transfer
  * transaction's amount is converted to GBP via its account's rate, then
- * split across that account's owners by share. Mirrors
- * computeIncomeExpenseSummary's transfer-exclusion rule.
+ * split across that account's owners by share — or, when the transaction
+ * has a `splitOverride`, across those people instead (e.g. a shared dinner
+ * paid from one person's sole account but split with someone else who
+ * doesn't own it). Mirrors computeIncomeExpenseSummary's transfer-exclusion
+ * rule.
  */
 export function computeHouseholdIncomeExpense(
   persons: Person[],
@@ -150,12 +153,13 @@ export function computeHouseholdIncomeExpense(
     const gbpPence = toGbpPence(account, t.amountPence);
     if (gbpPence === null) continue;
 
-    for (const owner of account.owners) {
-      const bucket = totals.get(owner.personId) ?? { incomePence: 0, expensePence: 0 };
-      const share = Math.round(gbpPence * (owner.sharePercent / 100));
+    const splits = t.splitOverride ?? account.owners;
+    for (const split of splits) {
+      const bucket = totals.get(split.personId) ?? { incomePence: 0, expensePence: 0 };
+      const share = Math.round(gbpPence * (split.sharePercent / 100));
       if (share > 0) bucket.incomePence += share;
       else if (share < 0) bucket.expensePence += Math.abs(share);
-      totals.set(owner.personId, bucket);
+      totals.set(split.personId, bucket);
     }
   }
 
@@ -164,4 +168,49 @@ export function computeHouseholdIncomeExpense(
     incomePence,
     expensePence,
   }));
+}
+
+export interface PersonBalance {
+  personId: string;
+  /** Positive: this person fronted more than their fair share — others owe them. Negative: they owe others. */
+  netOwedGbpPence: number;
+}
+
+/**
+ * Net "who owes whom" balance from split transactions (any transaction with
+ * a `splitOverride`, expense or income): each account owner's normal
+ * ownership share of the transaction is their "actual" cash flow (money
+ * that really left, or arrived in, their account); each person named in
+ * the split has a "fair" share of the same amount. A person's balance is
+ * fair-minus-actual — for an expense that makes the payer positive (they
+ * fronted more than their fair share, so others owe them) and split
+ * participants negative (they owe the payer); for income received it's the
+ * mirror image (the receiver is negative — they're holding money that
+ * isn't fully theirs — and the other split participants are positive,
+ * owed their share of it). Summed per person, the result is a net balance
+ * — not a full pairwise settle-up (e.g. "Bob owes Alice £12 and Carol £8"),
+ * just "Bob is £20 in the hole overall."
+ */
+export function computeSplitBalances(persons: Person[], accounts: Account[], transactions: Transaction[]): PersonBalance[] {
+  const accountsById = new Map(accounts.map((a) => [a.id, a]));
+  const totals = new Map<string, number>(persons.map((p) => [p.id, 0]));
+
+  for (const t of transactions) {
+    if (!t.splitOverride || t.transferId !== null) continue;
+    const account = accountsById.get(t.accountId);
+    if (!account) continue;
+    const gbpPence = toGbpPence(account, t.amountPence);
+    if (gbpPence === null) continue;
+
+    for (const owner of account.owners) {
+      const actual = Math.round(gbpPence * (owner.sharePercent / 100));
+      totals.set(owner.personId, (totals.get(owner.personId) ?? 0) - actual);
+    }
+    for (const split of t.splitOverride) {
+      const fairShare = Math.round(gbpPence * (split.sharePercent / 100));
+      totals.set(split.personId, (totals.get(split.personId) ?? 0) + fairShare);
+    }
+  }
+
+  return Array.from(totals.entries()).map(([personId, netOwedGbpPence]) => ({ personId, netOwedGbpPence }));
 }

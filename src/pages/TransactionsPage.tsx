@@ -1,19 +1,91 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeftRight } from 'lucide-react';
+import { ArrowLeftRight, Users } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import * as transfersRepo from '../db/transfersRepo';
+import * as transactionsRepo from '../db/transactionsRepo';
 import { formatPence } from '../utils/currency';
+import { ownerSummary } from '../utils/ownerSummary';
+import { ownersSharesAreValid } from '../domain/owners';
 import { EmptyState } from '../components/common/EmptyState';
-import type { Transaction } from '../domain/types';
+import { OwnerPicker } from '../components/common/OwnerPicker';
+import type { AccountOwner, Person, Transaction } from '../domain/types';
+
+function SplitDialog({
+  transaction,
+  persons,
+  onClose,
+  onSaved,
+}: {
+  transaction: Transaction;
+  persons: Person[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [owners, setOwners] = useState<AccountOwner[]>(transaction.splitOverride ?? []);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function save(nextOwners: AccountOwner[] | null) {
+    if (nextOwners && !ownersSharesAreValid(nextOwners)) {
+      setError('Shares must add up to 100%.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await transactionsRepo.updateTransaction({ ...transaction, splitOverride: nextOwners });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save split.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+        <h3>Split "{transaction.description}"</h3>
+        <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
+          Choose who this is shared between — doesn't have to be everyone. This updates income/expense and balance
+          reporting; it doesn't change who actually paid (the account's owner still shows on the row).
+        </p>
+        {persons.length === 0 ? (
+          <p className="muted">No household members yet — add some on the Household page first.</p>
+        ) : (
+          <OwnerPicker persons={persons} owners={owners} onChange={setOwners} />
+        )}
+        {error && <p className="error">{error}</p>}
+        <div className="dialog-actions">
+          {transaction.splitOverride && (
+            <button className="btn btn-ghost danger" onClick={() => save(null)} disabled={submitting}>
+              Clear split
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" onClick={() => save(owners.length > 0 ? owners : null)} disabled={submitting}>
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function TransactionsPage() {
-  const { accounts, transactions, transfers, refresh } = useAppStore();
+  const { accounts, persons, transactions, transfers, refresh } = useAppStore();
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [selectedForLink, setSelectedForLink] = useState<string[]>([]);
+  const [splittingTransaction, setSplittingTransaction] = useState<Transaction | null>(null);
 
   const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
+  const personsById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
   const transfersById = useMemo(() => new Map(transfers.map((t) => [t.id, t])), [transfers]);
+  const activePersons = persons.filter((p) => !p.archived);
 
   const filtered = useMemo(() => {
     return transactions
@@ -107,12 +179,27 @@ export function TransactionsPage() {
     );
   }
 
+  function splitControl(transaction: Transaction) {
+    if (transaction.splitOverride) {
+      return (
+        <button className="chip chip-confirmed" onClick={() => setSplittingTransaction(transaction)}>
+          <Users size={12} /> {ownerSummary(transaction.splitOverride, personsById)}
+        </button>
+      );
+    }
+    return (
+      <button className="chip chip-outline" onClick={() => setSplittingTransaction(transaction)}>
+        Split
+      </button>
+    );
+  }
+
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <h2>Transactions</h2>
-          <p className="page-subtitle">Search, filter, and manage transfers across every account.</p>
+          <p className="page-subtitle">Search, filter, and manage transfers and splits across every account.</p>
         </div>
       </div>
 
@@ -153,28 +240,44 @@ export function TransactionsPage() {
                 <tr>
                   <th>Date</th>
                   <th>Account</th>
+                  <th>Owner</th>
                   <th>Description</th>
                   <th>Amount</th>
                   <th>Balance</th>
                   <th>Transfer</th>
+                  <th>Split</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((t) => (
-                  <tr key={t.id}>
-                    <td>{t.date}</td>
-                    <td>{accountsById.get(t.accountId)?.name ?? '—'}</td>
-                    <td>{t.description}</td>
-                    <td className={t.amountPence < 0 ? 'negative' : 'positive'}>{formatPence(t.amountPence, t.currency)}</td>
-                    <td>{t.balancePence !== null ? formatPence(t.balancePence, t.currency) : '—'}</td>
-                    <td>{transferBadge(t)}</td>
-                  </tr>
-                ))}
+                {filtered.map((t) => {
+                  const account = accountsById.get(t.accountId);
+                  return (
+                    <tr key={t.id}>
+                      <td>{t.date}</td>
+                      <td>{account?.name ?? '—'}</td>
+                      <td className="muted">{account ? ownerSummary(account.owners, personsById) : '—'}</td>
+                      <td>{t.description}</td>
+                      <td className={t.amountPence < 0 ? 'negative' : 'positive'}>{formatPence(t.amountPence, t.currency)}</td>
+                      <td>{t.balancePence !== null ? formatPence(t.balancePence, t.currency) : '—'}</td>
+                      <td>{transferBadge(t)}</td>
+                      <td>{splitControl(t)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {splittingTransaction && (
+        <SplitDialog
+          transaction={splittingTransaction}
+          persons={activePersons}
+          onClose={() => setSplittingTransaction(null)}
+          onSaved={refresh}
+        />
+      )}
     </div>
   );
 }

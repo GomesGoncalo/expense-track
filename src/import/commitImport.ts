@@ -71,6 +71,7 @@ export async function commitImport(input: CommitImportInput): Promise<CommitImpo
       dedupeHash,
       transferId: null,
       category: null,
+      splitOverride: null,
       createdAt: nowIso(),
     });
   }

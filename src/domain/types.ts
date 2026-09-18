@@ -84,6 +84,14 @@ export interface Transaction {
   dedupeHash: string;
   transferId: string | null;
   category: string | null; // reserved for future use, unused in v1
+  /**
+   * Overrides the owning account's owners for *this transaction only*, when
+   * splitting income/expense by person (e.g. a dinner paid from one
+   * person's sole account but shared between two of three household
+   * members). Null means "use the account's owners" — the common case.
+   * Shares must sum to 100, same as Account.owners.
+   */
+  splitOverride: AccountOwner[] | null;
   createdAt: string;
 }
 
