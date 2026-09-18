@@ -18,18 +18,22 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  ArrowLeftRight,
   ArrowRight,
   BarChart3,
+  CalendarDays,
   Download,
   Layers,
   PiggyBank,
   PieChart,
+  Receipt,
   Repeat,
   Sparkles,
   Store,
   TrendingDown,
   TrendingUp,
   Upload,
+  Users,
   Wallet,
   X,
 } from 'lucide-react';
@@ -46,6 +50,11 @@ import { computeInsights } from '../reporting/insights';
 import { computeRecurringPayments } from '../reporting/recurring';
 import type { RecurringPayment } from '../reporting/recurring';
 import { computeTopMerchants } from '../reporting/merchants';
+import { computeHouseholdIncomeExpense } from '../reporting/byPerson';
+import { computeBiggestTransactions } from '../reporting/biggestTransactions';
+import { computeSpendingByWeekday } from '../reporting/byWeekday';
+import * as transfersRepo from '../db/transfersRepo';
+import type { Transaction, Transfer } from '../domain/types';
 import { categoryColorOrder } from '../domain/categories';
 import { exportBackup, downloadBackup, readBackupFile, importBackup } from '../db/backup';
 import { formatPence } from '../utils/currency';
@@ -80,7 +89,7 @@ interface AccountBalanceRow {
 }
 
 export function DashboardPage() {
-  const { accounts, transactions, transfers, valuationSnapshots, categories, refresh, loaded } = useAppStore();
+  const { persons, accounts, transactions, transfers, valuationSnapshots, categories, refresh, loaded } = useAppStore();
   /** Fixed reference order so a category always gets the same chart color, regardless of current data/sort order. */
   const categoryColorOrderList = useMemo(() => [...categoryColorOrder(categories), UNCATEGORIZED, OTHER_BUCKET], [categories]);
   const [period, setPeriod] = useState<Period>('this-month');
@@ -121,6 +130,18 @@ export function DashboardPage() {
     // "no category set", distinct from the display label 'Uncategorized'.
     const value = category === UNCATEGORIZED ? 'uncategorized' : category;
     navigate(`/transactions?category=${encodeURIComponent(value)}`);
+  }
+
+  async function handleConfirmTransfer(transferId: string) {
+    await transfersRepo.confirm(transferId);
+    await refresh();
+    show({ tone: 'success', message: 'Transfer confirmed.' });
+  }
+
+  async function handleRejectTransfer(transferId: string) {
+    await transfersRepo.reject(transferId);
+    await refresh();
+    show({ tone: 'success', message: 'Transfer suggestion rejected.' });
   }
 
   const netWorth = useMemo(
@@ -251,6 +272,44 @@ export function DashboardPage() {
   );
 
   const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
+  const transactionsById = useMemo(() => new Map(transactions.map((t) => [t.id, t])), [transactions]);
+
+  const pendingTransferRows = useMemo(() => {
+    return transfers
+      .map((transfer) => ({
+        transfer,
+        outgoing: transactionsById.get(transfer.outgoingTransactionId),
+        incoming: transactionsById.get(transfer.incomingTransactionId),
+      }))
+      .filter(
+        (row): row is { transfer: Transfer; outgoing: Transaction; incoming: Transaction } =>
+          row.transfer.status === 'suggested' && row.outgoing !== undefined && row.incoming !== undefined,
+      );
+  }, [transfers, transactionsById]);
+
+  const activePersons = useMemo(() => persons.filter((p) => !p.archived), [persons]);
+  const personCashFlow = useMemo(
+    () => computeHouseholdIncomeExpense(activePersons, accounts, transactions, start, end),
+    [activePersons, accounts, transactions, start, end],
+  );
+  const personChartData = useMemo(() => {
+    const personsById = new Map(activePersons.map((p) => [p.id, p]));
+    return personCashFlow.map((p) => ({
+      person: personsById.get(p.personId)?.name ?? '—',
+      Income: p.incomePence / 100,
+      Expense: p.expensePence / 100,
+    }));
+  }, [personCashFlow, activePersons]);
+
+  const biggestTransactions = useMemo(
+    () => computeBiggestTransactions(transactions, start, end),
+    [transactions, start, end],
+  );
+
+  const weekdaySpendingData = useMemo(
+    () => computeSpendingByWeekday(transactions, start, end).map((w) => ({ label: w.label, amount: w.expensePence / 100 })),
+    [transactions, start, end],
+  );
 
   async function handleExport() {
     const backup = await exportBackup();
@@ -317,6 +376,46 @@ export function DashboardPage() {
     { key: 'lastSeen', header: 'Last seen', render: (r) => r.lastDate, align: 'right' },
   ];
 
+  const biggestTransactionsColumns: TableColumn<Transaction>[] = [
+    { key: 'date', header: 'Date', render: (t) => t.date },
+    { key: 'description', header: 'Description', render: (t) => t.description },
+    { key: 'account', header: 'Account', render: (t) => accountsById.get(t.accountId)?.name ?? '—' },
+    { key: 'category', header: 'Category', render: (t) => t.category ?? UNCATEGORIZED },
+    { key: 'amount', header: 'Amount', render: (t) => formatPence(t.amountPence, t.currency), align: 'right' },
+  ];
+
+  type PendingTransferRow = { transfer: Transfer; outgoing: Transaction; incoming: Transaction };
+  const pendingTransferColumns: TableColumn<PendingTransferRow>[] = [
+    { key: 'date', header: 'Date', render: (r) => r.outgoing.date },
+    {
+      key: 'accounts',
+      header: 'Between',
+      render: (r) =>
+        `${accountsById.get(r.outgoing.accountId)?.name ?? '—'} → ${accountsById.get(r.incoming.accountId)?.name ?? '—'}`,
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: (r) => formatPence(Math.abs(r.outgoing.amountPence), r.outgoing.currency),
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      render: (r) => (
+        <div className="form-inline" style={{ gap: 6, justifyContent: 'flex-end' }}>
+          <Button variant="ghost" size="sm" onClick={() => handleConfirmTransfer(r.transfer.id)}>
+            Confirm
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => handleRejectTransfer(r.transfer.id)}>
+            Reject
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
   if (!loaded) {
     return (
       <div className="page">
@@ -380,6 +479,16 @@ export function DashboardPage() {
               );
             })}
           </div>
+        </Card>
+      )}
+
+      {pendingTransferRows.length > 0 && (
+        <Card title="Pending transfers" icon={<ArrowLeftRight size={18} />}>
+          <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
+            Matched by amount and date across two of your accounts — confirm to exclude both legs from income/expense
+            totals below, or reject if it isn't really a transfer.
+          </p>
+          <Table columns={pendingTransferColumns} rows={pendingTransferRows} rowKey={(r) => r.transfer.id} />
         </Card>
       )}
 
@@ -497,6 +606,33 @@ export function DashboardPage() {
         )}
       </Card>
 
+      {personCashFlow.length > 1 && (
+        <Card
+          title="By person"
+          icon={<Users size={18} />}
+          headerActions={
+            <Button variant="ghost" size="sm" onClick={() => navigate('/household')}>
+              Net worth &amp; who-owes-whom <ArrowRight size={14} />
+            </Button>
+          }
+        >
+          <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
+            Split by each account's ownership share (or a transaction's manual split, when set), for the period above.
+          </p>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={personChartData}>
+              <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+              <XAxis dataKey="person" tick={{ fontSize: 12 }} />
+              <YAxis tickFormatter={(v) => formatPence(Number(v) * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
+              <Legend />
+              <Bar dataKey="Income" fill="var(--positive)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="Expense" fill="var(--negative)" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+
       <Card title="Spending by category (this period)" icon={<PieChart size={18} />}>
         {allCategoriesInPeriod.length > 0 && (
           <div className="chip-toggle-row">
@@ -593,6 +729,30 @@ export function DashboardPage() {
           </ResponsiveContainer>
         ) : (
           <EmptyState title="No spending yet" description="Import a statement to see your biggest payees." />
+        )}
+      </Card>
+
+      <Card title="Biggest transactions (this period)" icon={<Receipt size={18} />}>
+        {biggestTransactions.length > 0 ? (
+          <Table columns={biggestTransactionsColumns} rows={biggestTransactions} rowKey={(t) => t.id} />
+        ) : (
+          <EmptyState title="No spending yet" description="Import a statement to see your largest individual purchases." />
+        )}
+      </Card>
+
+      <Card title="Spending by day of week (this period)" icon={<CalendarDays size={18} />}>
+        {weekdaySpendingData.some((d) => d.amount > 0) ? (
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={weekdaySpendingData}>
+              <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+              <YAxis tickFormatter={(v) => formatPence(Number(v) * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
+              <Bar dataKey="amount" fill="var(--negative)" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyState title="No spending yet" description="Import a statement to see which days you spend the most." />
         )}
       </Card>
 
