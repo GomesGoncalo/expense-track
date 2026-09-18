@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Download, TrendingUp, Upload, Wallet } from 'lucide-react';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { BarChart3, Download, TrendingUp, Upload, Wallet } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import { computeNetWorthSeries, computeNetWorthSummary } from '../reporting/netWorth';
-import { computeIncomeExpenseSummary } from '../reporting/incomeExpense';
+import { computeIncomeExpenseSeries, computeIncomeExpenseSummary } from '../reporting/incomeExpense';
 import { exportBackup, downloadBackup, readBackupFile, importBackup } from '../db/backup';
 import { formatPence } from '../utils/currency';
 import { todayIsoDate } from '../utils/dates';
@@ -50,6 +50,12 @@ export function DashboardPage() {
   );
   const { start, end } = periodRange(period);
   const incomeExpense = useMemo(() => computeIncomeExpenseSummary(transactions, start, end), [transactions, start, end]);
+  const cashFlowSeries = useMemo(() => computeIncomeExpenseSeries(transactions, 'month'), [transactions]);
+  const cashFlowChartData = cashFlowSeries.map((p) => ({
+    period: p.period.slice(0, 7),
+    Income: p.incomePence / 100,
+    Expense: p.expensePence / 100,
+  }));
 
   const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
 
@@ -184,6 +190,27 @@ export function DashboardPage() {
         <p className="muted" style={{ marginTop: 12 }}>
           Confirmed transfers between your own accounts are excluded from these totals.
         </p>
+      </div>
+
+      <div className="card">
+        <h3>
+          <BarChart3 size={18} /> Cash flow over time
+        </h3>
+        {cashFlowChartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={cashFlowChartData}>
+              <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+              <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+              <YAxis tickFormatter={(v) => formatPence(v * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
+              <Legend />
+              <Bar dataKey="Income" fill="var(--positive)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="Expense" fill="var(--negative)" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyState title="No data yet" description="Import a statement to see income and expenses by month." />
+        )}
       </div>
 
       <div className="card">

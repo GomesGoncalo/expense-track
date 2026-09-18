@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeIncomeExpenseSummary } from '../../src/reporting/incomeExpense';
+import { computeIncomeExpenseSeries, computeIncomeExpenseSummary } from '../../src/reporting/incomeExpense';
 import { createId, nowIso } from '../../src/domain/id';
 import type { Transaction } from '../../src/domain/types';
 
@@ -64,5 +64,31 @@ describe('computeIncomeExpenseSummary', () => {
     const summary = computeIncomeExpenseSummary(transactions, '2026-01-01', '2026-01-31');
     expect(summary.byAccount.a).toEqual({ incomePence: 0, expensePence: 1000 });
     expect(summary.byAccount.b).toEqual({ incomePence: 3000, expensePence: 0 });
+  });
+});
+
+describe('computeIncomeExpenseSeries', () => {
+  it('buckets income and expense by month', () => {
+    const transactions = [
+      makeTransaction({ amountPence: 200000, date: '2026-01-05' }),
+      makeTransaction({ amountPence: -3000, date: '2026-01-20' }),
+      makeTransaction({ amountPence: -1500, date: '2026-02-10' }),
+    ];
+    const series = computeIncomeExpenseSeries(transactions, 'month');
+    expect(series).toEqual([
+      { period: '2026-01-01', incomePence: 200000, expensePence: 3000 },
+      { period: '2026-02-01', incomePence: 0, expensePence: 1500 },
+    ]);
+  });
+
+  it('excludes confirmed transfers and sorts chronologically', () => {
+    const transactions = [
+      makeTransaction({ amountPence: -1000, date: '2026-02-05' }),
+      makeTransaction({ amountPence: 500, date: '2026-01-05', transferId: 'transfer1' }),
+      makeTransaction({ amountPence: 500, date: '2026-01-05' }),
+    ];
+    const series = computeIncomeExpenseSeries(transactions, 'month');
+    expect(series.map((p) => p.period)).toEqual(['2026-01-01', '2026-02-01']);
+    expect(series[0].incomePence).toBe(500);
   });
 });

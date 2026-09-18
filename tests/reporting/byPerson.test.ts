@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeHouseholdIncomeExpense,
+  computeHouseholdNetCashFlowSeries,
   computeHouseholdNetWorth,
   computeHouseholdNetWorthSeries,
   computeSplitBalances,
@@ -293,5 +294,55 @@ describe('computeSplitBalances', () => {
     const result = computeSplitBalances([alice, bob, carol], [account], transactions);
     const total = result.reduce((sum, p) => sum + p.netOwedGbpPence, 0);
     expect(total).toBe(0);
+  });
+});
+
+describe('computeHouseholdNetCashFlowSeries', () => {
+  it('buckets each person net (income minus expense) by month, split-aware', () => {
+    const alice = makePerson({ id: 'alice' });
+    const bob = makePerson({ id: 'bob' });
+    const account = makeAccount({
+      id: 'acc1',
+      owners: [
+        { personId: 'alice', sharePercent: 60 },
+        { personId: 'bob', sharePercent: 40 },
+      ],
+    });
+    const transactions = [
+      makeTransaction({ accountId: 'acc1', amountPence: 100000, date: '2026-01-05' }), // salary, owner split
+      makeTransaction({ accountId: 'acc1', amountPence: -20000, date: '2026-01-10' }), // groceries, owner split
+      makeTransaction({
+        accountId: 'acc1',
+        amountPence: -10000,
+        date: '2026-02-03',
+        splitOverride: [{ personId: 'bob', sharePercent: 100 }], // Bob-only expense, overrides owner split
+      }),
+    ];
+
+    const series = computeHouseholdNetCashFlowSeries([alice, bob], [account], transactions, 'month');
+    expect(series.map((p) => p.period)).toEqual(['2026-01-01', '2026-02-01']);
+
+    // January: net = 80000 (100000 - 20000), split 60/40
+    expect(series[0].perPersonNetGbpPence.alice).toBe(48000);
+    expect(series[0].perPersonNetGbpPence.bob).toBe(32000);
+
+    // February: Bob-only expense via splitOverride
+    expect(series[1].perPersonNetGbpPence.alice).toBe(0);
+    expect(series[1].perPersonNetGbpPence.bob).toBe(-10000);
+  });
+
+  it('excludes transfers and returns zero-filled entries for people with no activity in a period', () => {
+    const alice = makePerson({ id: 'alice' });
+    const bob = makePerson({ id: 'bob' });
+    const account = makeAccount({ id: 'acc1', owners: [{ personId: 'alice', sharePercent: 100 }] });
+    const transactions = [
+      makeTransaction({ accountId: 'acc1', amountPence: -5000, date: '2026-01-05' }),
+      makeTransaction({ accountId: 'acc1', amountPence: -5000, date: '2026-01-06', transferId: 'transfer1' }),
+    ];
+
+    const series = computeHouseholdNetCashFlowSeries([alice, bob], [account], transactions, 'month');
+    expect(series).toHaveLength(1);
+    expect(series[0].perPersonNetGbpPence.alice).toBe(-5000);
+    expect(series[0].perPersonNetGbpPence.bob).toBe(0);
   });
 });

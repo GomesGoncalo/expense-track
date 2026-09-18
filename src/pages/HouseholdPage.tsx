@@ -1,21 +1,25 @@
 import { useMemo, useState } from 'react';
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import { Plus, Scale, Trash2, Users } from 'lucide-react';
+import { Activity, Plus, Scale, Trash2, Users } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import * as personsRepo from '../db/personsRepo';
 import {
   computeHouseholdIncomeExpense,
+  computeHouseholdNetCashFlowSeries,
   computeHouseholdNetWorth,
   computeHouseholdNetWorthSeries,
   computeSplitBalances,
@@ -114,6 +118,16 @@ export function HouseholdPage() {
     return row;
   });
 
+  const cashFlowSeries = useMemo(
+    () => computeHouseholdNetCashFlowSeries(activePersons, accounts, transactions, 'month'),
+    [activePersons, accounts, transactions],
+  );
+  const cashFlowChartData = cashFlowSeries.map((point) => {
+    const row: Record<string, string | number> = { period: point.period.slice(0, 7) };
+    for (const person of activePersons) row[person.name] = (point.perPersonNetGbpPence[person.id] ?? 0) / 100;
+    return row;
+  });
+
   async function handleArchivePerson(personId: string) {
     await personsRepo.archivePerson(personId);
     await refresh();
@@ -192,14 +206,52 @@ export function HouseholdPage() {
 
           <section className="card">
             <h3>Net worth over time by person</h3>
+            <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
+              Stacked — the top of the shaded area is the household total; each band is one person's share of it.
+            </p>
             {seriesChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={seriesChartData}>
+                <AreaChart data={seriesChartData}>
                   <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
                   <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                   <YAxis tickFormatter={(v) => formatPence(v * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
                   <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
                   <Legend />
+                  {activePersons.map((p) => (
+                    <Area
+                      key={p.id}
+                      type="monotone"
+                      dataKey={p.name}
+                      stackId="net-worth"
+                      stroke={colorFor(p.colorIndex)}
+                      fill={colorFor(p.colorIndex)}
+                      fillOpacity={0.65}
+                    />
+                  ))}
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState title="No data yet" description="Import statements for each person's accounts to see this chart." />
+            )}
+          </section>
+
+          <section className="card">
+            <h3>
+              <Activity size={18} /> Net cash flow by person, over time
+            </h3>
+            <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
+              Income minus expense each month, per person (split-aware) — above the line means saving, below means
+              spending more than they brought in.
+            </p>
+            {cashFlowChartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={cashFlowChartData}>
+                  <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+                  <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                  <YAxis tickFormatter={(v) => formatPence(v * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
+                  <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
+                  <Legend />
+                  <ReferenceLine y={0} stroke="var(--border-strong)" />
                   {activePersons.map((p) => (
                     <Line
                       key={p.id}
@@ -219,7 +271,7 @@ export function HouseholdPage() {
 
           <section className="card">
             <div className="card-header-row">
-              <h3>Income &amp; expenses by person</h3>
+              <h3>Income &amp; expenses by person (this period)</h3>
               <select value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
                 <option value="this-month">This month</option>
                 <option value="last-month">Last month</option>

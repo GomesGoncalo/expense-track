@@ -1,3 +1,5 @@
+import { bucketDate } from './netWorth';
+import type { NetWorthGranularity } from './netWorth';
 import type { Transaction } from '../domain/types';
 
 export interface IncomeExpenseSummary {
@@ -48,4 +50,35 @@ export function computeIncomeExpenseSummary(
     netPence: totalIncomePence - totalExpensePence,
     byAccount,
   };
+}
+
+export interface IncomeExpensePoint {
+  period: string; // bucket start date, ISO yyyy-MM-dd
+  incomePence: number;
+  expensePence: number;
+}
+
+/**
+ * Income/expense bucketed over time (e.g. one point per month), for
+ * trend charts — same transfer-exclusion rule as computeIncomeExpenseSummary,
+ * just grouped by period instead of collapsed into one range.
+ */
+export function computeIncomeExpenseSeries(
+  transactions: Transaction[],
+  granularity: NetWorthGranularity = 'month',
+): IncomeExpensePoint[] {
+  const buckets = new Map<string, { incomePence: number; expensePence: number }>();
+
+  for (const t of transactions) {
+    if (t.transferId !== null) continue;
+    const period = bucketDate(t.date, granularity);
+    const bucket = buckets.get(period) ?? { incomePence: 0, expensePence: 0 };
+    if (t.amountPence > 0) bucket.incomePence += t.amountPence;
+    else if (t.amountPence < 0) bucket.expensePence += Math.abs(t.amountPence);
+    buckets.set(period, bucket);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([period, { incomePence, expensePence }]) => ({ period, incomePence, expensePence }))
+    .sort((a, b) => (a.period < b.period ? -1 : 1));
 }

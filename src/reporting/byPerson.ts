@@ -214,3 +214,50 @@ export function computeSplitBalances(persons: Person[], accounts: Account[], tra
 
   return Array.from(totals.entries()).map(([personId, netOwedGbpPence]) => ({ personId, netOwedGbpPence }));
 }
+
+export interface PersonNetCashFlowPoint {
+  period: string; // bucket start date, ISO yyyy-MM-dd
+  perPersonNetGbpPence: Record<string, number>;
+}
+
+/**
+ * Per-person net cash flow (income minus expense, GBP, split-aware) bucketed
+ * over time — the trend-over-time counterpart to computeHouseholdIncomeExpense's
+ * single-period snapshot. One line per person rather than income+expense
+ * bars per person, since N people × 2 series gets cluttered fast; net flow
+ * still answers "who's saving vs bleeding money" at a glance.
+ */
+export function computeHouseholdNetCashFlowSeries(
+  persons: Person[],
+  accounts: Account[],
+  transactions: Transaction[],
+  granularity: NetWorthGranularity = 'month',
+): PersonNetCashFlowPoint[] {
+  const accountsById = new Map(accounts.map((a) => [a.id, a]));
+  const buckets = new Map<string, Record<string, number>>();
+
+  for (const t of transactions) {
+    if (t.transferId !== null) continue;
+    const account = accountsById.get(t.accountId);
+    if (!account) continue;
+    const gbpPence = toGbpPence(account, t.amountPence);
+    if (gbpPence === null) continue;
+
+    const period = bucketDate(t.date, granularity);
+    const bucket = buckets.get(period) ?? {};
+
+    const splits = t.splitOverride ?? account.owners;
+    for (const split of splits) {
+      const share = Math.round(gbpPence * (split.sharePercent / 100));
+      bucket[split.personId] = (bucket[split.personId] ?? 0) + share;
+    }
+    buckets.set(period, bucket);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([period, perPersonNetGbpPence]) => ({
+      period,
+      perPersonNetGbpPence: Object.fromEntries(persons.map((p) => [p.id, perPersonNetGbpPence[p.id] ?? 0])),
+    }))
+    .sort((a, b) => (a.period < b.period ? -1 : 1));
+}
