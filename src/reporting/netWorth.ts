@@ -119,6 +119,8 @@ export interface NetWorthPoint {
   date: string;
   totalGbpPence: number;
   perAccountPence: Record<string, number>;
+  /** Same balances as perAccountPence, converted to GBP — omits accounts with no manual rate set. */
+  perAccountGbpPence: Record<string, number>;
 }
 
 export function bucketDate(isoDate: string, granularity: NetWorthGranularity): string {
@@ -184,18 +186,22 @@ export function computeNetWorthSeries(
 
     const bucketKey = bucketDate(date, granularity);
     const perAccountPence: Record<string, number> = {};
+    const perAccountGbpPence: Record<string, number> = {};
     let totalGbpPence = 0;
     for (const account of activeAccounts) {
       const balance = lastKnown.get(account.id);
       if (balance === undefined) continue;
       perAccountPence[account.id] = balance;
       const gbpPence = toGbpPence(account, balance);
-      if (gbpPence !== null) totalGbpPence += gbpPence;
+      if (gbpPence !== null) {
+        totalGbpPence += gbpPence;
+        perAccountGbpPence[account.id] = gbpPence;
+      }
     }
 
     // Overwrite with the latest point within the bucket, so each bucket
     // reflects the most recent known balances up to its end.
-    bucketed.set(bucketKey, { date: bucketKey, totalGbpPence, perAccountPence });
+    bucketed.set(bucketKey, { date: bucketKey, totalGbpPence, perAccountPence, perAccountGbpPence });
   }
 
   return Array.from(bucketed.values()).sort((a, b) => (a.date < b.date ? -1 : 1));

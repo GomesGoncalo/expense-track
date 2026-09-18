@@ -144,8 +144,22 @@ describe('computeNetWorthSeries', () => {
     expect(series.map((p) => p.date)).toEqual(['2026-01-01', '2026-01-02', '2026-01-05']);
     // on 2026-01-02, account A has no new point but should forward-fill 1000
     expect(series[1].totalGbpPence).toBe(1000 + 2000);
+    expect(series[1].perAccountGbpPence).toEqual({ a: 1000, b: 2000 });
     // on 2026-01-05, account B forward-fills 2000, account A updates to 1500
     expect(series[2].totalGbpPence).toBe(1500 + 2000);
+    expect(series[2].perAccountGbpPence).toEqual({ a: 1500, b: 2000 });
+  });
+
+  it('omits an account from perAccountGbpPence when it has no manual conversion rate', () => {
+    const gbpAccount = makeAccount({ id: 'a', currency: 'GBP' });
+    const eurAccount = makeAccount({ id: 'b', currency: 'EUR', manualRateToGbp: null });
+    const transactions = [
+      makeTransaction({ accountId: 'a', date: '2026-01-01', balancePence: 1000 }),
+      makeTransaction({ accountId: 'b', date: '2026-01-01', balancePence: 5000, currency: 'EUR' }),
+    ];
+    const series = computeNetWorthSeries([gbpAccount, eurAccount], transactions, [], 'day');
+    expect(series[0].perAccountGbpPence).toEqual({ a: 1000 });
+    expect(series[0].perAccountPence).toEqual({ a: 1000, b: 5000 });
   });
 
   it('returns an empty series when there is no data', () => {

@@ -1,7 +1,20 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import {
   ArrowRight,
   BarChart3,
@@ -28,7 +41,7 @@ import { computeInsights } from '../reporting/insights';
 import { categoryColorOrder } from '../domain/categories';
 import { exportBackup, downloadBackup, readBackupFile, importBackup } from '../db/backup';
 import { formatPence } from '../utils/currency';
-import { periodRange } from '../utils/dates';
+import { daysBetween, periodRange, todayIsoDate } from '../utils/dates';
 import type { Period } from '../utils/dates';
 import { getNamedCategoryColor, useColorScheme, getCategoricalColor } from '../utils/palette';
 import { usePersistedState } from '../utils/persistedState';
@@ -61,9 +74,13 @@ export function DashboardPage() {
     [],
   );
   const excludedCategories = useMemo(() => new Set(excludedCategoriesList), [excludedCategoriesList]);
+  const [excludedNetWorthAccountsList, setExcludedNetWorthAccountsList] = usePersistedState<string[]>(
+    'dashboard.excludedNetWorthAccounts',
+    [],
+  );
+  const excludedNetWorthAccounts = useMemo(() => new Set(excludedNetWorthAccountsList), [excludedNetWorthAccountsList]);
   const [drilldownCategory, setDrilldownCategory] = useState<string | null>(null);
   const scheme = useColorScheme();
-  const accentColor = getCategoricalColor(0, scheme === 'dark');
   const navigate = useNavigate();
   const { show } = useToast();
 
@@ -72,6 +89,14 @@ export function DashboardPage() {
       excludedCategoriesList.includes(category)
         ? excludedCategoriesList.filter((c) => c !== category)
         : [...excludedCategoriesList, category],
+    );
+  }
+
+  function toggleExcludedNetWorthAccount(accountId: string) {
+    setExcludedNetWorthAccountsList(
+      excludedNetWorthAccountsList.includes(accountId)
+        ? excludedNetWorthAccountsList.filter((id) => id !== accountId)
+        : [...excludedNetWorthAccountsList, accountId],
     );
   }
 
@@ -89,6 +114,29 @@ export function DashboardPage() {
   const series = useMemo(
     () => computeNetWorthSeries(accounts, transactions, valuationSnapshots, 'week'),
     [accounts, transactions, valuationSnapshots],
+  );
+  /** Fixed reference order so an account always gets the same chart color — see categoryColorOrderList above. */
+  const netWorthAccountOrder = useMemo(
+    () => [...accounts].filter((a) => !a.archived).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1)),
+    [accounts],
+  );
+  const netWorthAccountsWithData = useMemo(() => {
+    const idsWithData = new Set<string>();
+    for (const point of series) {
+      for (const accountId of Object.keys(point.perAccountGbpPence)) idsWithData.add(accountId);
+    }
+    return netWorthAccountOrder.filter((a) => idsWithData.has(a.id));
+  }, [series, netWorthAccountOrder]);
+  const netWorthChartData = useMemo(
+    () =>
+      series.map((point) => {
+        const row: Record<string, string | number> = { date: point.date };
+        for (const account of netWorthAccountsWithData) {
+          row[account.id] = (point.perAccountGbpPence[account.id] ?? 0) / 100;
+        }
+        return row;
+      }),
+    [series, netWorthAccountsWithData],
   );
   const { start, end } = periodRange(period);
   const incomeExpense = useMemo(() => computeIncomeExpenseSummary(transactions, start, end), [transactions, start, end]);
@@ -153,6 +201,7 @@ export function DashboardPage() {
     period: p.period.slice(0, 7),
     Income: p.incomePence / 100,
     Expense: p.expensePence / 100,
+    Net: (p.incomePence - p.expensePence) / 100,
   }));
 
   const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
@@ -189,11 +238,30 @@ export function DashboardPage() {
     }
   }
 
+  const STALE_BALANCE_DAYS = 45;
   const accountBalanceRows: AccountBalanceRow[] = netWorth.subtotalsByCurrency.flatMap((s) => s.accountBalances);
   const accountBalanceColumns: TableColumn<AccountBalanceRow>[] = [
     { key: 'account', header: 'Account', render: (b) => accountsById.get(b.accountId)?.name ?? '—' },
     { key: 'balance', header: 'Balance', render: (b) => formatPence(b.latestBalancePence, b.currency), align: 'right' },
-    { key: 'asOf', header: 'As of', render: (b) => b.asOfDate, align: 'right' },
+    {
+      key: 'asOf',
+      header: 'As of',
+      align: 'right',
+      render: (b) => {
+        const stale = daysBetween(b.asOfDate, todayIsoDate()) > STALE_BALANCE_DAYS;
+        return (
+          <>
+            {b.asOfDate}
+            {stale && (
+              <span className="stale-tag" title="No newer statement imported for this account">
+                {' '}
+                stale
+              </span>
+            )}
+          </>
+        );
+      },
+    },
   ];
 
   if (!loaded) {
@@ -254,7 +322,7 @@ export function DashboardPage() {
                   }}
                 >
                   <Icon size={16} className={`insight-icon ${insight.tone}`} />
-                  <span>{insight.message}</span>
+                  <span className="insight-message">{insight.message}</span>
                 </button>
               );
             })}
@@ -263,16 +331,57 @@ export function DashboardPage() {
       )}
 
       <Card title="Net worth over time" icon={<TrendingUp size={18} />}>
-        {series.length > 0 ? (
-          <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={series}>
-              <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-              <YAxis tickFormatter={(v) => formatPence(v, 'GBP')} width={90} tick={{ fontSize: 12 }} />
-              <Tooltip formatter={(v) => formatPence(Number(v), 'GBP')} />
-              <Area type="monotone" dataKey="totalGbpPence" stroke={accentColor} fill={accentColor} fillOpacity={0.18} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
+        {netWorthChartData.length > 0 ? (
+          <>
+            <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
+              Each step lands exactly on a statement or valuation update — flat stretches mean no newer data, not a
+              flat balance. Click a label to hide that account.
+            </p>
+            <div className="chip-toggle-row">
+              {netWorthAccountsWithData.map((account, index) => {
+                const isExcluded = excludedNetWorthAccounts.has(account.id);
+                return (
+                  <button
+                    key={account.id}
+                    className={isExcluded ? 'chip chip-outline chip-muted' : 'chip chip-outline'}
+                    onClick={() => toggleExcludedNetWorthAccount(account.id)}
+                    title={isExcluded ? 'Click to show' : 'Click to hide'}
+                  >
+                    <span
+                      className="color-dot"
+                      style={{ background: getCategoricalColor(index, scheme === 'dark') }}
+                    />
+                    {account.name}
+                  </button>
+                );
+              })}
+            </div>
+            <ResponsiveContainer width="100%" height={280}>
+              <AreaChart data={netWorthChartData}>
+                <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                <YAxis tickFormatter={(v) => formatPence(Number(v) * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(v, name) => [formatPence(Number(v) * 100, 'GBP'), name]} />
+                {netWorthAccountsWithData
+                  .filter((account) => !excludedNetWorthAccounts.has(account.id))
+                  .map((account) => (
+                    <Area
+                      key={account.id}
+                      type="stepAfter"
+                      dataKey={account.id}
+                      name={account.name}
+                      stackId="net-worth"
+                      stroke={getCategoricalColor(netWorthAccountsWithData.indexOf(account), scheme === 'dark')}
+                      fill={getCategoricalColor(netWorthAccountsWithData.indexOf(account), scheme === 'dark')}
+                      fillOpacity={0.7}
+                      strokeWidth={1.5}
+                      dot={{ r: 2 }}
+                      isAnimationActive={false}
+                    />
+                  ))}
+              </AreaChart>
+            </ResponsiveContainer>
+          </>
         ) : (
           <EmptyState title="No data yet" description="Import a statement to see your net worth trend here." />
         )}
@@ -458,15 +567,16 @@ export function DashboardPage() {
       <Card title="Cash flow over time" icon={<BarChart3 size={18} />}>
         {cashFlowChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={cashFlowChartData}>
+            <ComposedChart data={cashFlowChartData}>
               <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
               <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-              <YAxis tickFormatter={(v) => formatPence(v * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
+              <YAxis tickFormatter={(v) => formatPence(Number(v) * 100, 'GBP')} width={90} tick={{ fontSize: 12 }} />
               <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
               <Legend />
               <Bar dataKey="Income" fill="var(--positive)" radius={[3, 3, 0, 0]} />
               <Bar dataKey="Expense" fill="var(--negative)" radius={[3, 3, 0, 0]} />
-            </BarChart>
+              <Line type="linear" dataKey="Net" stroke="var(--accent)" strokeWidth={2} dot={{ r: 3 }} />
+            </ComposedChart>
           </ResponsiveContainer>
         ) : (
           <EmptyState title="No data yet" description="Import a statement to see income and expenses by month." />

@@ -353,6 +353,14 @@ button:disabled {
   text-decoration: line-through;
 }
 
+.stale-tag {
+  color: var(--warning);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 /* ---------- Drill-down panel ---------- */
 .drilldown-panel {
   margin-top: 16px;
@@ -789,8 +797,10 @@ button:disabled {
   border: none;
   color: inherit;
   font: inherit;
+  white-space: normal;
   cursor: pointer;
   transition: background var(--duration-fast) ease;
+  width: 100%;
 }
 
 .insight-row:hover {
@@ -800,6 +810,11 @@ button:disabled {
 .insight-icon {
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+.insight-message {
+  flex: 1;
+  min-width: 0;
 }
 
 .insight-icon.up {
