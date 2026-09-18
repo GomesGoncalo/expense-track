@@ -3,6 +3,7 @@ import type { BankParser } from './BankParser';
 import { FirstDirectParser } from './firstdirect/FirstDirectParser';
 import { HsbcParser } from './hsbc/HsbcParser';
 import { HsbcCreditCardParser } from './hsbc/HsbcCreditCardParser';
+import { ChaseParser } from './chase/ChaseParser';
 import { MonzoParser } from './monzo/MonzoParser';
 import { RevolutParser } from './revolut/RevolutParser';
 import { VanguardParser } from './vanguard/VanguardParser';
@@ -12,6 +13,7 @@ import { Trading212Parser } from './trading212/Trading212Parser';
 export const PARSERS: Record<BankId, BankParser> = {
   'first-direct': FirstDirectParser,
   hsbc: HsbcParser,
+  chase: ChaseParser,
   monzo: MonzoParser,
   revolut: RevolutParser,
   vanguard: VanguardParser,
@@ -36,6 +38,7 @@ export function getParserForAccount(bank: BankId, accountType: AccountType): Ban
 export const BANK_LABELS: Record<BankId, string> = {
   'first-direct': 'First Direct',
   hsbc: 'HSBC',
+  chase: 'Chase',
   monzo: 'Monzo',
   revolut: 'Revolut',
   vanguard: 'Vanguard',

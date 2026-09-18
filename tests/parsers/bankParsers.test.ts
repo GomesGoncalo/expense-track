@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { FirstDirectParser } from '../../src/parsers/firstdirect/FirstDirectParser';
 import { HsbcParser } from '../../src/parsers/hsbc/HsbcParser';
 import { HsbcCreditCardParser } from '../../src/parsers/hsbc/HsbcCreditCardParser';
+import { ChaseParser } from '../../src/parsers/chase/ChaseParser';
 import { MonzoParser } from '../../src/parsers/monzo/MonzoParser';
 import { RevolutParser } from '../../src/parsers/revolut/RevolutParser';
 import { VanguardParser } from '../../src/parsers/vanguard/VanguardParser';
@@ -79,6 +80,7 @@ describe.each([
     pages: creditCardPages,
     mentionText: 'Your HSBC Premier Credit Card Statement',
   },
+  { parser: ChaseParser, name: 'Chase', pages: singleAmountPages, mentionText: 'Chase Saver statement' },
   { parser: MonzoParser, name: 'Monzo', pages: singleAmountPages, mentionText: 'Monzo Bank Ltd' },
   { parser: RevolutParser, name: 'Revolut', pages: singleAmountPages, mentionText: 'Revolut Ltd' },
   { parser: VanguardParser, name: 'Vanguard', pages: singleAmountPages, mentionText: 'Vanguard Asset Management' },
