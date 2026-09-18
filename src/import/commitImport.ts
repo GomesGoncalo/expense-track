@@ -19,6 +19,8 @@ export interface CommitImportInput {
   columnMappingUsed: ColumnMapping | null;
   /** Rows after the user has reviewed/edited/excluded duplicates in the preview table. */
   rows: ParsedTransactionRow[];
+  /** From ParseResult.endingValuation, when the statement stated an account total directly. */
+  endingValuation?: { date: string; valuePence: number } | null;
 }
 
 export interface CommitImportResult {
@@ -101,15 +103,31 @@ export async function commitImport(input: CommitImportInput): Promise<CommitImpo
   });
 
   if (input.account.valuationBased) {
-    const lastWithBalance = [...input.rows].reverse().find((r) => r.balancePence !== null);
-    if (lastWithBalance && lastWithBalance.balancePence !== null) {
+    if (input.endingValuation) {
       await valuationSnapshotsRepo.addSnapshot(
         input.account.id,
-        lastWithBalance.date,
-        lastWithBalance.balancePence,
+        input.endingValuation.date,
+        input.endingValuation.valuePence,
         'statement',
         statementImportId,
       );
+    } else {
+      // Fallback for statements with no explicit account-total summary (or
+      // parsed via the manual column-mapping UI): the last transaction row
+      // that stated a running balance. For a cash account this is the true
+      // balance; for a valuation-based one it may just be leftover cash
+      // (see VanguardParser), so a parser-level endingValuation is always
+      // preferred when available.
+      const lastWithBalance = [...input.rows].reverse().find((r) => r.balancePence !== null);
+      if (lastWithBalance && lastWithBalance.balancePence !== null) {
+        await valuationSnapshotsRepo.addSnapshot(
+          input.account.id,
+          lastWithBalance.date,
+          lastWithBalance.balancePence,
+          'statement',
+          statementImportId,
+        );
+      }
     }
   }
 

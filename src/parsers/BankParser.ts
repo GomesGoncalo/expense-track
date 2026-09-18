@@ -14,6 +14,16 @@ export interface ParseResult {
   statementPeriodStart: string | null;
   statementPeriodEnd: string | null;
   warnings: string[];
+  /**
+   * For a valuation-based account (a stocks ISA, an investment account): the
+   * account's total value as of the statement's closing date, when the
+   * statement states one directly (e.g. an "Account total" summary line).
+   * Distinct from Transaction.balancePence, which for these statements is
+   * often just a residual cash balance, not the portfolio's worth — see
+   * VanguardParser for the case that motivated this. Omitted/null for banks
+   * whose statements don't carry this kind of summary.
+   */
+  endingValuation?: { date: string; valuePence: number } | null;
 }
 
 export class ParserError extends Error {
