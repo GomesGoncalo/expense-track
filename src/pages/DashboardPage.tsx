@@ -10,6 +10,8 @@ import {
   ComposedChart,
   Legend,
   Line,
+  LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -20,8 +22,11 @@ import {
   BarChart3,
   Download,
   Layers,
+  PiggyBank,
   PieChart,
+  Repeat,
   Sparkles,
+  Store,
   TrendingDown,
   TrendingUp,
   Upload,
@@ -38,6 +43,9 @@ import {
   UNCATEGORIZED,
 } from '../reporting/byCategory';
 import { computeInsights } from '../reporting/insights';
+import { computeRecurringPayments } from '../reporting/recurring';
+import type { RecurringPayment } from '../reporting/recurring';
+import { computeTopMerchants } from '../reporting/merchants';
 import { categoryColorOrder } from '../domain/categories';
 import { exportBackup, downloadBackup, readBackupFile, importBackup } from '../db/backup';
 import { formatPence } from '../utils/currency';
@@ -55,6 +63,14 @@ import { useToast } from '../components/ui/Toast';
 import type { ImportMode } from '../db/backup';
 
 const OTHER_BUCKET = 'Other';
+
+function formatCadence(averageIntervalDays: number): string {
+  if (averageIntervalDays <= 10) return 'weekly';
+  if (averageIntervalDays <= 20) return 'fortnightly';
+  if (averageIntervalDays <= 40) return 'monthly';
+  if (averageIntervalDays <= 100) return 'quarterly';
+  return `every ~${Math.round(averageIntervalDays)} days`;
+}
 
 interface AccountBalanceRow {
   accountId: string;
@@ -162,6 +178,26 @@ export function DashboardPage() {
   );
   const drilldownChartData = drilldownSeries.map((p) => ({ period: p.period.slice(0, 7), amount: p.expensePence / 100 }));
 
+  const uncategorizedInfo = useMemo(() => {
+    let count = 0;
+    let totalPence = 0;
+    for (const t of transactions) {
+      if (t.transferId !== null || t.category !== null || t.amountPence >= 0) continue;
+      if (t.date < start || t.date > end) continue;
+      count += 1;
+      totalPence += Math.abs(t.amountPence);
+    }
+    return { count, totalPence };
+  }, [transactions, start, end]);
+
+  const topMerchants = useMemo(() => computeTopMerchants(transactions, start, end), [transactions, start, end]);
+  const topMerchantsChartData = useMemo(
+    () => topMerchants.map((m) => ({ description: m.description, amount: m.expensePence / 100 })),
+    [topMerchants],
+  );
+
+  const recurringPayments = useMemo(() => computeRecurringPayments(transactions), [transactions]);
+
   const insights = useMemo(() => computeInsights(transactions, transfers), [transactions, transfers]);
 
   // Unfiltered on purpose: the top-7+Other bucket set and the legend stay
@@ -203,6 +239,16 @@ export function DashboardPage() {
     Expense: p.expensePence / 100,
     Net: (p.incomePence - p.expensePence) / 100,
   }));
+  const savingsRateData = useMemo(
+    () =>
+      cashFlowSeries
+        .filter((p) => p.incomePence > 0)
+        .map((p) => ({
+          period: p.period.slice(0, 7),
+          rate: ((p.incomePence - p.expensePence) / p.incomePence) * 100,
+        })),
+    [cashFlowSeries],
+  );
 
   const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
 
@@ -262,6 +308,13 @@ export function DashboardPage() {
         );
       },
     },
+  ];
+
+  const recurringColumns: TableColumn<RecurringPayment>[] = [
+    { key: 'description', header: 'Payee', render: (r) => r.description },
+    { key: 'cadence', header: 'Cadence', render: (r) => formatCadence(r.averageIntervalDays) },
+    { key: 'amount', header: 'Avg. amount', render: (r) => formatPence(r.averageAmountPence, r.currency), align: 'right' },
+    { key: 'lastSeen', header: 'Last seen', render: (r) => r.lastDate, align: 'right' },
   ];
 
   if (!loaded) {
@@ -428,6 +481,20 @@ export function DashboardPage() {
         <p className="muted" style={{ marginTop: 12 }}>
           Confirmed transfers between your own accounts are excluded from these totals.
         </p>
+        {uncategorizedInfo.count > 0 && (
+          <div
+            className="warnings-inline"
+            style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}
+          >
+            <span>
+              {uncategorizedInfo.count} uncategorized transaction{uncategorizedInfo.count === 1 ? '' : 's'} this period (
+              {formatPence(uncategorizedInfo.totalPence)}) — left out of every category chart below.
+            </span>
+            <Button variant="ghost" size="sm" onClick={() => goToCategoryTransactions(UNCATEGORIZED)}>
+              Review <ArrowRight size={14} />
+            </Button>
+          </div>
+        )}
       </Card>
 
       <Card title="Spending by category (this period)" icon={<PieChart size={18} />}>
@@ -513,6 +580,22 @@ export function DashboardPage() {
         )}
       </Card>
 
+      <Card title="Top merchants (this period)" icon={<Store size={18} />}>
+        {topMerchantsChartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={Math.max(160, topMerchantsChartData.length * 40)}>
+            <BarChart data={topMerchantsChartData} layout="vertical" margin={{ left: 16 }}>
+              <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+              <XAxis type="number" tickFormatter={(v) => formatPence(Number(v) * 100, 'GBP')} tick={{ fontSize: 12 }} />
+              <YAxis type="category" dataKey="description" width={160} tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(v) => formatPence(Number(v) * 100, 'GBP')} />
+              <Bar dataKey="amount" fill="var(--negative)" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyState title="No spending yet" description="Import a statement to see your biggest payees." />
+        )}
+      </Card>
+
       <Card title="Spending by category, over time" icon={<Layers size={18} />}>
         {stackedCategoryData.length > 0 ? (
           <>
@@ -564,6 +647,22 @@ export function DashboardPage() {
         )}
       </Card>
 
+      <Card title="Recurring payments" icon={<Repeat size={18} />}>
+        {recurringPayments.length > 0 ? (
+          <>
+            <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
+              Detected from charges to the same payee on a regular cadence — a rough signal, not a guarantee.
+            </p>
+            <Table columns={recurringColumns} rows={recurringPayments} rowKey={(r) => r.key} />
+          </>
+        ) : (
+          <EmptyState
+            title="Nothing detected yet"
+            description="Once a payment repeats a few times on a regular cadence, it'll show up here."
+          />
+        )}
+      </Card>
+
       <Card title="Cash flow over time" icon={<BarChart3 size={18} />}>
         {cashFlowChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={280}>
@@ -580,6 +679,32 @@ export function DashboardPage() {
           </ResponsiveContainer>
         ) : (
           <EmptyState title="No data yet" description="Import a statement to see income and expenses by month." />
+        )}
+      </Card>
+
+      <Card title="Savings rate" icon={<PiggyBank size={18} />}>
+        {savingsRateData.length > 0 ? (
+          <>
+            <p className="muted" style={{ marginTop: -8, marginBottom: 8 }}>
+              Share of income kept each month, after expenses. Months with no recorded income are left out rather than
+              shown as 0%.
+            </p>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={savingsRateData}>
+                <CartesianGrid strokeDasharray="3 3" className="chart-grid" />
+                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <YAxis tickFormatter={(v) => `${v}%`} width={50} tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Savings rate']} />
+                <ReferenceLine y={0} stroke="var(--border)" />
+                <Line type="linear" dataKey="rate" stroke="var(--accent)" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </>
+        ) : (
+          <EmptyState
+            title="Not enough data yet"
+            description="Once you have a month with income recorded, your savings rate trend will show up here."
+          />
         )}
       </Card>
 
