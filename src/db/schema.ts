@@ -43,7 +43,7 @@ export interface ExpenseTrackDB extends DBSchema {
   transfers: {
     key: string;
     value: Transfer;
-    indexes: { 'by-status': TransferMatchStatus };
+    indexes: { 'by-status': TransferMatchStatus; 'by-outgoing': string; 'by-incoming': string };
   };
   valuationSnapshots: {
     key: string;
@@ -53,4 +53,4 @@ export interface ExpenseTrackDB extends DBSchema {
 }
 
 export const DB_NAME = 'expense-track';
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;

@@ -1,4 +1,4 @@
-import { buildBalanceSeries, bucketDate, computeLatestBalances, toGbpPence } from './netWorth';
+import { buildDateIndexedBalances, bucketDate, computeLatestBalances, toGbpPence } from './netWorth';
 import type { NetWorthGranularity } from './netWorth';
 import type { Account, Person, Transaction, Transfer, ValuationSnapshot } from '../domain/types';
 
@@ -73,16 +73,11 @@ export function computeHouseholdNetWorthSeries(
   valuationSnapshots: ValuationSnapshot[] = [],
   granularity: NetWorthGranularity = 'day',
 ): PersonNetWorthPoint[] {
-  const activeAccounts = accounts.filter((a) => !a.archived);
-  const seriesByAccount = new Map(
-    activeAccounts.map((a) => [a.id, buildBalanceSeries(a, transactions, valuationSnapshots)]),
+  const { activeAccounts, sortedDates, balanceByDateByAccount } = buildDateIndexedBalances(
+    accounts,
+    transactions,
+    valuationSnapshots,
   );
-
-  const allDates = new Set<string>();
-  for (const series of seriesByAccount.values()) {
-    for (const point of series) allDates.add(point.date);
-  }
-  const sortedDates = Array.from(allDates).sort();
   if (sortedDates.length === 0) return [];
 
   const lastKnown = new Map<string, number>();
@@ -90,10 +85,9 @@ export function computeHouseholdNetWorthSeries(
 
   for (const date of sortedDates) {
     for (const account of activeAccounts) {
-      const series = seriesByAccount.get(account.id) ?? [];
-      const pointsToday = series.filter((p) => p.date === date);
-      if (pointsToday.length > 0) {
-        lastKnown.set(account.id, pointsToday[pointsToday.length - 1].balancePence);
+      const balanceToday = balanceByDateByAccount.get(account.id)?.get(date);
+      if (balanceToday !== undefined) {
+        lastKnown.set(account.id, balanceToday);
       }
     }
 

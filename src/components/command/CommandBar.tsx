@@ -17,7 +17,7 @@ const GROUP_ICON: Record<SearchResultType, typeof ArrowLeftRight> = {
 };
 
 export function CommandBar({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { search } = useSearchIndex();
+  const { search } = useSearchIndex(open);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
 

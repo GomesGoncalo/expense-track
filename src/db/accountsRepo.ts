@@ -61,16 +61,18 @@ export async function deleteAccountCascade(accountId: string): Promise<void> {
   );
 
   const transactions = await tx.objectStore('transactions').index('by-account').getAll(accountId);
-  const transactionIds = new Set(transactions.map((t) => t.id));
 
-  const allTransfers = await tx.objectStore('transfers').getAll();
-  for (const transfer of allTransfers) {
-    if (
-      transactionIds.has(transfer.outgoingTransactionId) ||
-      transactionIds.has(transfer.incomingTransactionId)
-    ) {
-      await tx.objectStore('transfers').delete(transfer.id);
-    }
+  // Per-transaction indexed lookups instead of scanning the whole transfers
+  // store — bounded by this account's own transaction count, like every
+  // other delete below, rather than by every transfer in the database.
+  const transferIdsToDelete = new Set<string>();
+  for (const transaction of transactions) {
+    const outgoingMatches = await tx.objectStore('transfers').index('by-outgoing').getAll(transaction.id);
+    const incomingMatches = await tx.objectStore('transfers').index('by-incoming').getAll(transaction.id);
+    for (const transfer of [...outgoingMatches, ...incomingMatches]) transferIdsToDelete.add(transfer.id);
+  }
+  for (const transferId of transferIdsToDelete) {
+    await tx.objectStore('transfers').delete(transferId);
   }
 
   for (const transaction of transactions) {

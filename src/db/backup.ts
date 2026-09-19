@@ -146,6 +146,10 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
   }
 
   // merge mode: skip anything whose id already exists; dedupe transactions by hash too.
+  // One shared transaction across every store, same as replace mode above —
+  // each db.put(...) call outside a shared transaction commits on its own,
+  // so a large backup used to mean thousands of one-record transactions
+  // with no all-or-nothing guarantee if the import failed partway through.
   const summary: ImportSummary = {
     personsAdded: 0,
     accountsAdded: 0,
@@ -157,59 +161,65 @@ export async function importBackup(backup: BackupFileV1, mode: ImportMode): Prom
     categoriesAdded: 0,
   };
 
-  const existingPersonIds = new Set((await db.getAllKeys('persons')) as string[]);
+  const tx = db.transaction(
+    ['persons', 'accounts', 'statementImports', 'transactions', 'transfers', 'valuationSnapshots', 'categories'],
+    'readwrite',
+  );
+
+  const existingPersonIds = new Set(await tx.objectStore('persons').getAllKeys());
   for (const person of backup.persons) {
     if (existingPersonIds.has(person.id)) continue;
-    await db.put('persons', person);
+    await tx.objectStore('persons').put(person);
     summary.personsAdded += 1;
   }
 
-  const existingAccountIds = new Set((await db.getAllKeys('accounts')) as string[]);
+  const existingAccountIds = new Set(await tx.objectStore('accounts').getAllKeys());
   for (const account of backup.accounts) {
     if (existingAccountIds.has(account.id)) continue;
-    await db.put('accounts', account);
+    await tx.objectStore('accounts').put(account);
     summary.accountsAdded += 1;
   }
 
-  const existingImportIds = new Set((await db.getAllKeys('statementImports')) as string[]);
+  const existingImportIds = new Set(await tx.objectStore('statementImports').getAllKeys());
   for (const si of backup.statementImports) {
     if (existingImportIds.has(si.id)) continue;
-    await db.put('statementImports', si);
+    await tx.objectStore('statementImports').put(si);
     summary.statementImportsAdded += 1;
   }
 
-  const existingTransactionIds = new Set((await db.getAllKeys('transactions')) as string[]);
-  const existingHashes = new Set((await db.getAll('transactions')).map((t) => t.dedupeHash));
+  const existingTransactionIds = new Set(await tx.objectStore('transactions').getAllKeys());
+  const existingHashes = new Set((await tx.objectStore('transactions').getAll()).map((t) => t.dedupeHash));
   for (const transaction of backup.transactions) {
     if (existingTransactionIds.has(transaction.id) || existingHashes.has(transaction.dedupeHash)) {
       summary.transactionsSkippedDuplicate += 1;
       continue;
     }
-    await db.put('transactions', transaction);
+    await tx.objectStore('transactions').put(transaction);
     existingHashes.add(transaction.dedupeHash);
     summary.transactionsAdded += 1;
   }
 
-  const existingTransferIds = new Set((await db.getAllKeys('transfers')) as string[]);
+  const existingTransferIds = new Set(await tx.objectStore('transfers').getAllKeys());
   for (const transfer of backup.transfers) {
     if (existingTransferIds.has(transfer.id)) continue;
-    await db.put('transfers', transfer);
+    await tx.objectStore('transfers').put(transfer);
     summary.transfersAdded += 1;
   }
 
-  const existingSnapshotIds = new Set((await db.getAllKeys('valuationSnapshots')) as string[]);
+  const existingSnapshotIds = new Set(await tx.objectStore('valuationSnapshots').getAllKeys());
   for (const snapshot of backup.valuationSnapshots) {
     if (existingSnapshotIds.has(snapshot.id)) continue;
-    await db.put('valuationSnapshots', snapshot);
+    await tx.objectStore('valuationSnapshots').put(snapshot);
     summary.valuationSnapshotsAdded += 1;
   }
 
-  const existingCategoryIds = new Set((await db.getAllKeys('categories')) as string[]);
+  const existingCategoryIds = new Set(await tx.objectStore('categories').getAllKeys());
   for (const category of backup.categories) {
     if (existingCategoryIds.has(category.id)) continue;
-    await db.put('categories', category);
+    await tx.objectStore('categories').put(category);
     summary.categoriesAdded += 1;
   }
 
+  await tx.done;
   return summary;
 }

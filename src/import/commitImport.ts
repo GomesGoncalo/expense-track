@@ -9,6 +9,16 @@ import { findTransferCandidates } from '../transfers/matchTransfers';
 import type { Account, ColumnMapping, Transaction } from '../domain/types';
 import type { ParsedTransactionRow } from '../parsers/BankParser';
 
+/**
+ * Shared with quickAddTransaction.ts: the "what category did descriptions
+ * like this get last time" lookup, built fresh from the full transaction
+ * history. Kept in one place rather than each caller repeating
+ * `buildPriorCategoryLookup(await transactionsRepo.listAll())`.
+ */
+export async function buildCurrentPriorCategoryLookup() {
+  return buildPriorCategoryLookup(await transactionsRepo.listAll());
+}
+
 export interface CommitImportInput {
   account: Account;
   fileName: string;
@@ -73,7 +83,7 @@ export async function commitImport(input: CommitImportInput): Promise<CommitImpo
   // recurs (a subscription, a regular direct debit) picks up whatever
   // category it was given last time — including a manual correction —
   // instead of re-running the generic keyword guess every time.
-  const priorCategories = buildPriorCategoryLookup(await transactionsRepo.listAll());
+  const priorCategories = await buildCurrentPriorCategoryLookup();
 
   for (const row of input.rows) {
     const dedupeHash = await computeDedupeHash(input.account.id, row.date, row.description, row.amountPence);

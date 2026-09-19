@@ -1,9 +1,9 @@
 import { createId, nowIso } from '../domain/id';
 import { computeDedupeHash } from '../domain/hash';
-import { buildPriorCategoryLookup, resolveCategory } from '../domain/autoCategorize';
+import { resolveCategory } from '../domain/autoCategorize';
 import * as transactionsRepo from '../db/transactionsRepo';
 import * as statementImportsRepo from '../db/statementImportsRepo';
-import { runTransferMatching } from './commitImport';
+import { buildCurrentPriorCategoryLookup, runTransferMatching } from './commitImport';
 import type { Account, AccountOwner, Transaction } from '../domain/types';
 import type { Category } from '../domain/categories';
 
@@ -36,7 +36,7 @@ export async function findDuplicateTransaction(
 export async function quickAddTransaction(input: QuickAddTransactionInput): Promise<Transaction> {
   const dedupeHash = await computeDedupeHash(input.account.id, input.date, input.description, input.amountPence);
   const manualImport = await statementImportsRepo.getOrCreateManualImport(input.account);
-  const priorCategories = buildPriorCategoryLookup(await transactionsRepo.listAll());
+  const priorCategories = await buildCurrentPriorCategoryLookup();
   const category = input.category ?? resolveCategory(input.description, input.amountPence, priorCategories);
 
   const transaction: Transaction = {

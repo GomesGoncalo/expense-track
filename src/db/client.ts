@@ -8,7 +8,7 @@ let dbPromise: Promise<IDBPDatabase<ExpenseTrackDB>> | null = null;
 export function getDb(): Promise<IDBPDatabase<ExpenseTrackDB>> {
   if (!dbPromise) {
     dbPromise = openDB<ExpenseTrackDB>(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
+      upgrade(db, oldVersion, _newVersion, transaction) {
         if (oldVersion < 1) {
           const accounts = db.createObjectStore('accounts', { keyPath: 'id' });
           accounts.createIndex('by-bank', 'bank');
@@ -33,6 +33,13 @@ export function getDb(): Promise<IDBPDatabase<ExpenseTrackDB>> {
         }
         if (oldVersion < 3) {
           db.createObjectStore('categories', { keyPath: 'id' });
+        }
+        if (oldVersion < 4) {
+          // Lets deleteAccountCascade look up an account's transfers by
+          // transaction id instead of scanning the whole transfers store.
+          const transfers = transaction.objectStore('transfers');
+          transfers.createIndex('by-outgoing', 'outgoingTransactionId');
+          transfers.createIndex('by-incoming', 'incomingTransactionId');
         }
       },
     });

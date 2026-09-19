@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../state/store';
 import { BANK_LABELS } from '../../parsers';
@@ -19,14 +19,26 @@ const MAX_TRANSACTIONS = 8;
 const MAX_ACCOUNTS = 5;
 const MAX_PERSONS = 5;
 
-/** Purely client-side search over the in-memory store — this app has no backend to query. */
-export function useSearchIndex(): { search: (query: string) => SearchResult[] } {
+/** Stable "nothing built yet" reference — see the `!open` early return below. */
+const EMPTY_INDEX: SearchResult[] = [];
+
+/**
+ * Purely client-side search over the in-memory store — this app has no
+ * backend to query. `open` gates the expensive sort/map over the whole
+ * transaction history: CommandBar stays permanently mounted (AppShell) but
+ * is usually closed, and the store's refresh() replaces every array
+ * reference on every mutation anywhere in the app, so without this the
+ * index would rebuild on every data change whether or not anyone's
+ * actually searching.
+ */
+export function useSearchIndex(open: boolean): { search: (query: string) => SearchResult[] } {
   const transactions = useAppStore((s) => s.transactions);
   const accounts = useAppStore((s) => s.accounts);
   const persons = useAppStore((s) => s.persons);
   const navigate = useNavigate();
 
   const index = useMemo<SearchResult[]>(() => {
+    if (!open) return EMPTY_INDEX;
     const accountById = new Map(accounts.map((a) => [a.id, a]));
 
     const transactionResults: SearchResult[] = [...transactions]
@@ -62,21 +74,24 @@ export function useSearchIndex(): { search: (query: string) => SearchResult[] } 
     }));
 
     return [...transactionResults, ...accountResults, ...personResults];
-  }, [transactions, accounts, persons, navigate]);
+  }, [open, transactions, accounts, persons, navigate]);
 
-  function search(query: string): SearchResult[] {
-    const trimmed = query.trim().toLowerCase();
-    if (!trimmed) return [];
+  const search = useCallback(
+    (query: string): SearchResult[] => {
+      const trimmed = query.trim().toLowerCase();
+      if (!trimmed) return [];
 
-    const matches = index.filter((entry) => entry.keywords.toLowerCase().includes(trimmed));
-    const byType = (type: SearchResultType, max: number) => matches.filter((m) => m.type === type).slice(0, max);
+      const matches = index.filter((entry) => entry.keywords.toLowerCase().includes(trimmed));
+      const byType = (type: SearchResultType, max: number) => matches.filter((m) => m.type === type).slice(0, max);
 
-    return [
-      ...byType('transaction', MAX_TRANSACTIONS),
-      ...byType('account', MAX_ACCOUNTS),
-      ...byType('person', MAX_PERSONS),
-    ];
-  }
+      return [
+        ...byType('transaction', MAX_TRANSACTIONS),
+        ...byType('account', MAX_ACCOUNTS),
+        ...byType('person', MAX_PERSONS),
+      ];
+    },
+    [index],
+  );
 
   return { search };
 }

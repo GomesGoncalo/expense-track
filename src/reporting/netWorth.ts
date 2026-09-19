@@ -154,22 +154,55 @@ export function buildBalanceSeries(
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
+export interface DateIndexedBalances {
+  activeAccounts: Account[];
+  sortedDates: string[];
+  /** Each account's stated balance on a given date, for dates it actually has a point on. */
+  balanceByDateByAccount: Map<string, Map<string, number>>;
+}
+
+/**
+ * Shared setup for computeNetWorthSeries and byPerson.ts's
+ * computeHouseholdNetWorthSeries: every active account's balance series,
+ * indexed by date once up front. Looking a date up this way instead of
+ * `series.filter(p => p.date === date)` per date per account turns what
+ * was an O(dates × accounts × points-per-account) scan into one pass over
+ * each account's own points. buildBalanceSeries returns points sorted
+ * ascending, so a later set() for a repeated date naturally keeps the
+ * last one, same as the filter().at(-1) this replaces.
+ */
+export function buildDateIndexedBalances(
+  accounts: Account[],
+  transactions: Transaction[],
+  valuationSnapshots: ValuationSnapshot[],
+): DateIndexedBalances {
+  const activeAccounts = accounts.filter((a) => !a.archived);
+
+  const allDates = new Set<string>();
+  const balanceByDateByAccount = new Map<string, Map<string, number>>();
+  for (const account of activeAccounts) {
+    const byDate = new Map<string, number>();
+    for (const point of buildBalanceSeries(account, transactions, valuationSnapshots)) {
+      byDate.set(point.date, point.balancePence);
+      allDates.add(point.date);
+    }
+    balanceByDateByAccount.set(account.id, byDate);
+  }
+
+  return { activeAccounts, sortedDates: Array.from(allDates).sort(), balanceByDateByAccount };
+}
+
 export function computeNetWorthSeries(
   accounts: Account[],
   transactions: Transaction[],
   valuationSnapshots: ValuationSnapshot[] = [],
   granularity: NetWorthGranularity = 'day',
 ): NetWorthPoint[] {
-  const activeAccounts = accounts.filter((a) => !a.archived);
-  const seriesByAccount = new Map(
-    activeAccounts.map((a) => [a.id, buildBalanceSeries(a, transactions, valuationSnapshots)]),
+  const { activeAccounts, sortedDates, balanceByDateByAccount } = buildDateIndexedBalances(
+    accounts,
+    transactions,
+    valuationSnapshots,
   );
-
-  const allDates = new Set<string>();
-  for (const series of seriesByAccount.values()) {
-    for (const point of series) allDates.add(point.date);
-  }
-  const sortedDates = Array.from(allDates).sort();
   if (sortedDates.length === 0) return [];
 
   const lastKnown = new Map<string, number>();
@@ -177,10 +210,9 @@ export function computeNetWorthSeries(
 
   for (const date of sortedDates) {
     for (const account of activeAccounts) {
-      const series = seriesByAccount.get(account.id) ?? [];
-      const pointsToday = series.filter((p) => p.date === date);
-      if (pointsToday.length > 0) {
-        lastKnown.set(account.id, pointsToday[pointsToday.length - 1].balancePence);
+      const balanceToday = balanceByDateByAccount.get(account.id)?.get(date);
+      if (balanceToday !== undefined) {
+        lastKnown.set(account.id, balanceToday);
       }
     }
 

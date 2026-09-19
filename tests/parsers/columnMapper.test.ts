@@ -58,4 +58,35 @@ describe('parseWithMapping', () => {
     expect(transactions[0].balancePence).toBe(47500);
     expect(transactions[0].description).toBe('GYM MEMBERSHIP');
   });
+
+  it('skips a trailing page with no repeated header, instead of misreading a stray number as a transaction', () => {
+    // A second page with no header row at all — e.g. a T&Cs/disclosure
+    // page. Its "12.00" sits in the same x-range as the amount column, and
+    // currentDate carries over from the last real transaction, so without
+    // re-detecting the header per page this would silently become a bogus
+    // second transaction reusing that stale date.
+    const twoPagePages: TextLine[][] = [
+      pages[0],
+      [
+        line(100, [
+          { str: 'See clause', x: 80 },
+          { str: '12.00', x: 300 },
+        ]),
+      ],
+    ];
+
+    const mapping: ColumnMapping = {
+      dateColumnIndex: 0,
+      descriptionColumnIndex: 1,
+      moneyOutColumnIndex: null,
+      moneyInColumnIndex: null,
+      singleAmountColumnIndex: 2,
+      balanceColumnIndex: 3,
+      dateFormat: 'dd/MM/yyyy',
+      headerRowIndex: 0,
+    };
+
+    const { transactions } = parseWithMapping(twoPagePages, mapping, 'GBP');
+    expect(transactions).toHaveLength(1);
+  });
 });
