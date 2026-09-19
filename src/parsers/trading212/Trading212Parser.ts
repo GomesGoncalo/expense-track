@@ -1,6 +1,5 @@
-import { ParserError } from '../BankParser';
 import type { BankParser, ParseResult } from '../BankParser';
-import { findHeaderColumns, parseTableRows, periodFromTransactions } from '../tableParsing';
+import { parseSimpleTableStatement } from '../tableParsing';
 import type { TextLine } from '../pdfText';
 
 /**
@@ -30,19 +29,10 @@ export const Trading212Parser: BankParser = {
   },
 
   parse(pages: TextLine[][]): ParseResult {
-    const header = findHeaderColumns(pages, HEADER_CONFIG);
-    if (!header) {
-      throw new ParserError(
-        'Could not find a recognizable transaction table header in this Trading212 statement.',
-      );
-    }
-
-    const { transactions, warnings } = parseTableRows(pages, header, {
+    return parseSimpleTableStatement(pages, {
+      headerConfig: HEADER_CONFIG,
       dateFormat: DATE_FORMAT,
-      defaultCurrency: 'GBP',
-    }, HEADER_CONFIG);
-
-    const { start, end } = periodFromTransactions(transactions);
-    return { transactions, statementPeriodStart: start, statementPeriodEnd: end, warnings };
+      notFoundMessage: 'Could not find a recognizable transaction table header in this Trading212 statement.',
+    });
   },
 };

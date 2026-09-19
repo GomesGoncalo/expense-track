@@ -1,6 +1,5 @@
-import { ParserError } from '../BankParser';
 import type { BankParser, ParseResult } from '../BankParser';
-import { findHeaderColumns, parseTableRows, periodFromTransactions } from '../tableParsing';
+import { parseSimpleTableStatement } from '../tableParsing';
 import { parseAmountToPence, parseCreditCardAmountToPence } from '../../utils/currency';
 import type { TextLine } from '../pdfText';
 
@@ -58,24 +57,17 @@ export const HsbcCreditCardParser: BankParser = {
   },
 
   parse(pages: TextLine[][]): ParseResult {
-    const header = findHeaderColumns(pages, HEADER_CONFIG);
-    if (!header) {
-      throw new ParserError('Could not find a recognizable transaction table header in this HSBC credit card statement.');
-    }
-
-    const { transactions, warnings } = parseTableRows(
-      pages,
-      header,
-      { dateFormat: DATE_FORMAT, defaultCurrency: 'GBP', amountParser: parseCreditCardAmountToPence },
-      HEADER_CONFIG,
-    );
-
-    const newBalancePence = extractNewBalancePence(pages);
-    if (newBalancePence !== null && transactions.length > 0) {
-      transactions[transactions.length - 1].balancePence = newBalancePence;
-    }
-
-    const { start, end } = periodFromTransactions(transactions);
-    return { transactions, statementPeriodStart: start, statementPeriodEnd: end, warnings };
+    return parseSimpleTableStatement(pages, {
+      headerConfig: HEADER_CONFIG,
+      dateFormat: DATE_FORMAT,
+      amountParser: parseCreditCardAmountToPence,
+      notFoundMessage: 'Could not find a recognizable transaction table header in this HSBC credit card statement.',
+      postProcess: (transactions, pages) => {
+        const newBalancePence = extractNewBalancePence(pages);
+        if (newBalancePence !== null && transactions.length > 0) {
+          transactions[transactions.length - 1].balancePence = newBalancePence;
+        }
+      },
+    });
   },
 };

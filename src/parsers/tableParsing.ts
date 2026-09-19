@@ -1,7 +1,8 @@
 import { parseAmountToPence } from '../utils/currency';
 import { parseStatementDate } from '../utils/dates';
 import type { TextLine } from './pdfText';
-import type { ParsedTransactionRow } from './BankParser';
+import { ParserError } from './BankParser';
+import type { ParsedTransactionRow, ParseResult } from './BankParser';
 
 export type ColumnRole =
   | 'date'
@@ -193,6 +194,16 @@ export interface ParseTableOptions {
    * card statement, where that convention is inverted.
    */
   amountParser?: (raw: string) => number;
+  /**
+   * Whether a line with no amount yet (the start of a wrapped multi-line
+   * transaction, per this function's own doc comment) accumulates into the
+   * next row's description. Defaults to true. Set false for a statement
+   * whose transactions are never wrapped across lines (e.g. ChaseParser) —
+   * there, a no-amount line is statement furniture (an "Opening balance"/
+   * "Closing balance" row, a trailing category sub-label) that should be
+   * silently skipped, not prefixed onto whatever real transaction follows.
+   */
+  accumulateDescriptionAcrossLines?: boolean;
 }
 
 export interface TableParseResult {
@@ -337,8 +348,12 @@ export function parseRowsFromColumns(
 
       if (amountPence === null) {
         // No amount yet on this line: it's the start (or a middle segment)
-        // of a transaction description that continues on a later line.
-        if (descriptionText) pendingDescriptionParts.push(descriptionText);
+        // of a transaction description that continues on a later line —
+        // unless the caller says this statement never wraps like that, in
+        // which case it's furniture to skip, not text to carry forward.
+        if (options.accumulateDescriptionAcrossLines !== false && descriptionText) {
+          pendingDescriptionParts.push(descriptionText);
+        }
         continue;
       }
 
@@ -383,4 +398,57 @@ export function periodFromTransactions(
   if (transactions.length === 0) return { start: null, end: null };
   const dates = transactions.map((t) => t.date).sort();
   return { start: dates[0], end: dates[dates.length - 1] };
+}
+
+export interface SimpleTableStatementOptions {
+  headerConfig: HeaderLabelConfig;
+  dateFormat: string;
+  /** Defaults to 'GBP'. */
+  defaultCurrency?: string;
+  /** For a statement with a non-default sign/format convention (e.g. a credit card's inverted CR/plain-amount rule). */
+  amountParser?: (raw: string) => number;
+  /** See ParseTableOptions — false for a statement whose transactions are never wrapped across lines. */
+  accumulateDescriptionAcrossLines?: boolean;
+  /** Thrown as a ParserError (triggers the manual-mapping fallback) when no header table is found. */
+  notFoundMessage: string;
+  /**
+   * Optional adjustment after the table parse, before the statement period
+   * is derived from it — e.g. HsbcCreditCardParser stamping a period-end
+   * balance (stated separately, not per-row) onto the last transaction.
+   */
+  postProcess?: (transactions: ParsedTransactionRow[], pages: TextLine[][]) => void;
+}
+
+/**
+ * The shared shape behind most bank parsers' `parse()`: find the header,
+ * parse the table under it, run an optional adjustment, then derive the
+ * statement period from the resulting transactions. Covers every parser
+ * whose only real per-bank variation is its header labels, date format, and
+ * (occasionally) amount-parsing/line-wrapping convention — not one with its
+ * own extraction logic layered around that core (VanguardParser's
+ * account-summary/period lookup), which calls
+ * findHeaderColumns/parseTableRows/periodFromTransactions directly instead.
+ */
+export function parseSimpleTableStatement(pages: TextLine[][], options: SimpleTableStatementOptions): ParseResult {
+  const header = findHeaderColumns(pages, options.headerConfig);
+  if (!header) {
+    throw new ParserError(options.notFoundMessage);
+  }
+
+  const { transactions, warnings } = parseTableRows(
+    pages,
+    header,
+    {
+      dateFormat: options.dateFormat,
+      defaultCurrency: options.defaultCurrency ?? 'GBP',
+      amountParser: options.amountParser,
+      accumulateDescriptionAcrossLines: options.accumulateDescriptionAcrossLines,
+    },
+    options.headerConfig,
+  );
+
+  options.postProcess?.(transactions, pages);
+
+  const { start, end } = periodFromTransactions(transactions);
+  return { transactions, statementPeriodStart: start, statementPeriodEnd: end, warnings };
 }
