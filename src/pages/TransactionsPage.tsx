@@ -92,7 +92,12 @@ function SplitDialog({
 }
 
 export function TransactionsPage() {
-  const { accounts, persons, transactions, transfers, categories, refresh } = useAppStore();
+  const accounts = useAppStore((s) => s.accounts);
+  const persons = useAppStore((s) => s.persons);
+  const transactions = useAppStore((s) => s.transactions);
+  const transfers = useAppStore((s) => s.transfers);
+  const categories = useAppStore((s) => s.categories);
+  const refresh = useAppStore((s) => s.refresh);
   const categoryNames = useMemo(() => selectableCategoryNames(categories), [categories]);
   const categoryFilterNames = useMemo(() => categoryColorOrder(categories), [categories]);
   const [searchParams] = useSearchParams();

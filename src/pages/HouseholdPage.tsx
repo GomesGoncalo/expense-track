@@ -70,7 +70,12 @@ function PersonForm({ onCreated }: { onCreated: () => void }) {
 }
 
 export function HouseholdPage() {
-  const { persons, accounts, transactions, transfers, valuationSnapshots, refresh } = useAppStore();
+  const persons = useAppStore((s) => s.persons);
+  const accounts = useAppStore((s) => s.accounts);
+  const transactions = useAppStore((s) => s.transactions);
+  const transfers = useAppStore((s) => s.transfers);
+  const valuationSnapshots = useAppStore((s) => s.valuationSnapshots);
+  const refresh = useAppStore((s) => s.refresh);
   const activePersons = persons.filter((p) => !p.archived);
   const [period, setPeriod] = useState<Period>('this-month');
   const scheme = useColorScheme();

@@ -34,7 +34,9 @@ const STAGE_LABEL: Record<Stage, string> = {
 };
 
 export function ImportPage() {
-  const { accounts, persons, refresh } = useAppStore();
+  const accounts = useAppStore((s) => s.accounts);
+  const persons = useAppStore((s) => s.persons);
+  const refresh = useAppStore((s) => s.refresh);
   const activeAccounts = accounts.filter((a) => !a.archived);
   const personsById = new Map(persons.map((p) => [p.id, p]));
   const { show } = useToast();

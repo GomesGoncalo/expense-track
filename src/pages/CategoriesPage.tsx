@@ -144,7 +144,9 @@ function CategoryRow({
 }
 
 export function CategoriesPage() {
-  const { categories, transactions, refresh } = useAppStore();
+  const categories = useAppStore((s) => s.categories);
+  const transactions = useAppStore((s) => s.transactions);
+  const refresh = useAppStore((s) => s.refresh);
   const scheme = useColorScheme();
   const [pendingDelete, setPendingDelete] = useState<CustomCategory | null>(null);
   const { show } = useToast();

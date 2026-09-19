@@ -318,7 +318,9 @@ function UpdateValueDialog({ account, onClose, onSaved }: { account: Account; on
 }
 
 export function AccountsPage() {
-  const { accounts, persons, refresh } = useAppStore();
+  const accounts = useAppStore((s) => s.accounts);
+  const persons = useAppStore((s) => s.persons);
+  const refresh = useAppStore((s) => s.refresh);
   const activePersons = persons.filter((p) => !p.archived);
   const personsById = new Map(persons.map((p) => [p.id, p]));
   const [updatingValueFor, setUpdatingValueFor] = useState<Account | null>(null);

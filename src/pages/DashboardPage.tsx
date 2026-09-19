@@ -92,7 +92,14 @@ interface AccountBalanceRow {
 }
 
 export function DashboardPage() {
-  const { persons, accounts, transactions, transfers, valuationSnapshots, categories, refresh, loaded } = useAppStore();
+  const persons = useAppStore((s) => s.persons);
+  const accounts = useAppStore((s) => s.accounts);
+  const transactions = useAppStore((s) => s.transactions);
+  const transfers = useAppStore((s) => s.transfers);
+  const valuationSnapshots = useAppStore((s) => s.valuationSnapshots);
+  const categories = useAppStore((s) => s.categories);
+  const refresh = useAppStore((s) => s.refresh);
+  const loaded = useAppStore((s) => s.loaded);
   /** Fixed reference order so a category always gets the same chart color, regardless of current data/sort order. */
   const categoryColorOrderList = useMemo(() => [...categoryColorOrder(categories), UNCATEGORIZED, OTHER_BUCKET], [categories]);
   const [period, setPeriod] = useState<Period>('this-month');

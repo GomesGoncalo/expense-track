@@ -22,7 +22,11 @@ export interface QuickAddTransactionModalProps {
 type Direction = 'out' | 'in';
 
 export function QuickAddTransactionModal({ open, onClose, defaultAccountId }: QuickAddTransactionModalProps) {
-  const { accounts, persons, transactions, categories, refresh } = useAppStore();
+  const accounts = useAppStore((s) => s.accounts);
+  const persons = useAppStore((s) => s.persons);
+  const transactions = useAppStore((s) => s.transactions);
+  const categories = useAppStore((s) => s.categories);
+  const refresh = useAppStore((s) => s.refresh);
   const { show } = useToast();
   const activeAccounts = useMemo(() => accounts.filter((a) => !a.archived), [accounts]);
   const categoryNames = useMemo(() => selectableCategoryNames(categories), [categories]);
