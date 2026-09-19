@@ -163,6 +163,15 @@ export function TransactionsPage() {
     show({ tone: 'success', message: 'Transfer unlinked.' });
   }
 
+  async function handleToggleSettlement(transferId: string, settlement: boolean) {
+    await transfersRepo.setSettlement(transferId, settlement);
+    await refresh();
+    show({
+      tone: 'success',
+      message: settlement ? 'Marked as a settlement between people.' : 'Unmarked as a settlement.',
+    });
+  }
+
   function toggleSelectForLink(id: string, amountPence: number) {
     setSelectedForLink((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
@@ -224,9 +233,26 @@ export function TransactionsPage() {
       );
     }
 
+    // "Mark as settlement" only makes sense between two different people's
+    // own accounts — a transfer between two of your own (single-owner)
+    // accounts isn't anyone settling up with anyone.
+    const outgoingTxn = transactions.find((t) => t.id === transfer.outgoingTransactionId);
+    const incomingTxn = transactions.find((t) => t.id === transfer.incomingTransactionId);
+    const outgoingOwners = outgoingTxn && accountsById.get(outgoingTxn.accountId)?.owners;
+    const incomingOwners = incomingTxn && accountsById.get(incomingTxn.accountId)?.owners;
+    const outgoingSoleOwner = outgoingOwners?.length === 1 ? outgoingOwners[0].personId : null;
+    const incomingSoleOwner = incomingOwners?.length === 1 ? incomingOwners[0].personId : null;
+    const isCrossPerson =
+      outgoingSoleOwner !== null && incomingSoleOwner !== null && outgoingSoleOwner !== incomingSoleOwner;
+
     return (
       <span className="chip chip-confirmed">
-        Transfer ↔ {otherAccountName}
+        {transfer.settlement ? 'Settlement' : 'Transfer'} ↔ {otherAccountName}
+        {isCrossPerson && (
+          <button className="btn-sm" onClick={() => handleToggleSettlement(transfer.id, !transfer.settlement)}>
+            {transfer.settlement ? 'Unmark settlement' : 'Mark as settlement'}
+          </button>
+        )}
         <button className="btn-sm" onClick={() => handleUnlink(transfer.id)}>
           Unlink
         </button>

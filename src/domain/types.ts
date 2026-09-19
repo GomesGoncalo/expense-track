@@ -108,6 +108,16 @@ export interface Transfer {
   matchConfidence: number; // 0..1, 1.0 for manual links
   createdAt: string;
   resolvedAt: string | null;
+  /**
+   * True when this transfer represents one household member settling up
+   * with another (e.g. paying back a shared expense) rather than the same
+   * person moving money between their own accounts. Only meaningful once
+   * status is 'confirmed'/'manual' — feeds reporting/byPerson.ts's
+   * computeSplitBalances so a real repayment can zero out (or reverse) a
+   * split-transaction balance, without needing a separate settlement
+   * entity: the transfer's own two legs already are the evidence.
+   */
+  settlement: boolean;
 }
 
 /**

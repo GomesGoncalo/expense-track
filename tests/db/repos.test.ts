@@ -178,4 +178,18 @@ describe('transfersRepo', () => {
     expect((await transactionsRepo.getTransaction(incoming.id))?.transferId).toBeNull();
     expect(await transfersRepo.listAll()).toHaveLength(0);
   });
+
+  it('a new transfer is not a settlement by default, and setSettlement toggles it', async () => {
+    const outgoing = makeTransaction({ accountId: 'accA', amountPence: -1000 });
+    const incoming = makeTransaction({ accountId: 'accB', amountPence: 1000 });
+    await transactionsRepo.insertMany([outgoing, incoming]);
+    const transfer = await transfersRepo.createManual(outgoing.id, incoming.id);
+    expect(transfer.settlement).toBe(false);
+
+    await transfersRepo.setSettlement(transfer.id, true);
+    expect((await transfersRepo.listAll()).find((t) => t.id === transfer.id)?.settlement).toBe(true);
+
+    await transfersRepo.setSettlement(transfer.id, false);
+    expect((await transfersRepo.listAll()).find((t) => t.id === transfer.id)?.settlement).toBe(false);
+  });
 });

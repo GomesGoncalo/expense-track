@@ -7,7 +7,7 @@ import {
   computeSplitBalances,
 } from '../../src/reporting/byPerson';
 import { createId, nowIso } from '../../src/domain/id';
-import type { Account, Person, Transaction } from '../../src/domain/types';
+import type { Account, Person, Transaction, Transfer } from '../../src/domain/types';
 
 function makePerson(overrides: Partial<Person> = {}): Person {
   return { id: createId(), name: 'Person', colorIndex: 0, createdAt: nowIso(), archived: false, ...overrides };
@@ -44,6 +44,20 @@ function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
     category: null,
     splitOverride: null,
     createdAt: nowIso(),
+    ...overrides,
+  };
+}
+
+function makeTransfer(overrides: Partial<Transfer> = {}): Transfer {
+  return {
+    id: createId(),
+    outgoingTransactionId: 'out',
+    incomingTransactionId: 'in',
+    status: 'confirmed',
+    matchConfidence: 1,
+    createdAt: nowIso(),
+    resolvedAt: nowIso(),
+    settlement: false,
     ...overrides,
   };
 }
@@ -294,6 +308,96 @@ describe('computeSplitBalances', () => {
     const result = computeSplitBalances([alice, bob, carol], [account], transactions);
     const total = result.reduce((sum, p) => sum + p.netOwedGbpPence, 0);
     expect(total).toBe(0);
+  });
+
+  it('a settlement-marked transfer clears an existing debt', () => {
+    const alice = makePerson({ id: 'alice' });
+    const bob = makePerson({ id: 'bob' });
+    const aliceAccount = makeAccount({ id: 'aliceAcc', owners: [{ personId: 'alice', sharePercent: 100 }] });
+    const bobAccount = makeAccount({ id: 'bobAcc', owners: [{ personId: 'bob', sharePercent: 100 }] });
+
+    const debtTxn = makeTransaction({
+      accountId: 'aliceAcc',
+      amountPence: -10000,
+      splitOverride: [
+        { personId: 'alice', sharePercent: 50 },
+        { personId: 'bob', sharePercent: 50 },
+      ],
+    }); // Alice fronts £100 for a shared expense -> Bob owes her £50
+
+    const repaymentOut = makeTransaction({ id: 'out1', accountId: 'bobAcc', amountPence: -5000, transferId: 'xfer1' });
+    const repaymentIn = makeTransaction({ id: 'in1', accountId: 'aliceAcc', amountPence: 5000, transferId: 'xfer1' });
+    const settlementTransfer = makeTransfer({
+      id: 'xfer1',
+      outgoingTransactionId: 'out1',
+      incomingTransactionId: 'in1',
+      settlement: true,
+    });
+
+    const result = computeSplitBalances(
+      [alice, bob],
+      [aliceAccount, bobAccount],
+      [debtTxn, repaymentOut, repaymentIn],
+      [settlementTransfer],
+    );
+    const byId = Object.fromEntries(result.map((p) => [p.personId, p.netOwedGbpPence]));
+    expect(byId.alice).toBe(0);
+    expect(byId.bob).toBe(0);
+  });
+
+  it('an unprompted settlement transfer creates a debt in the other direction', () => {
+    const alice = makePerson({ id: 'alice' });
+    const bob = makePerson({ id: 'bob' });
+    const aliceAccount = makeAccount({ id: 'aliceAcc', owners: [{ personId: 'alice', sharePercent: 100 }] });
+    const bobAccount = makeAccount({ id: 'bobAcc', owners: [{ personId: 'bob', sharePercent: 100 }] });
+
+    const out = makeTransaction({ id: 'out1', accountId: 'bobAcc', amountPence: -2000, transferId: 'xfer1' });
+    const inc = makeTransaction({ id: 'in1', accountId: 'aliceAcc', amountPence: 2000, transferId: 'xfer1' });
+    const transfer = makeTransfer({
+      id: 'xfer1',
+      outgoingTransactionId: 'out1',
+      incomingTransactionId: 'in1',
+      settlement: true,
+    });
+
+    const result = computeSplitBalances([alice, bob], [aliceAccount, bobAccount], [out, inc], [transfer]);
+    const byId = Object.fromEntries(result.map((p) => [p.personId, p.netOwedGbpPence]));
+    expect(byId.bob).toBe(2000); // Bob paid unprompted -> he's now owed
+    expect(byId.alice).toBe(-2000); // Alice received it -> she owes it back
+  });
+
+  it('ignores a settlement-marked transfer that is only suggested, not confirmed', () => {
+    const alice = makePerson({ id: 'alice' });
+    const bob = makePerson({ id: 'bob' });
+    const aliceAccount = makeAccount({ id: 'aliceAcc', owners: [{ personId: 'alice', sharePercent: 100 }] });
+    const bobAccount = makeAccount({ id: 'bobAcc', owners: [{ personId: 'bob', sharePercent: 100 }] });
+
+    const out = makeTransaction({ id: 'out1', accountId: 'bobAcc', amountPence: -2000 });
+    const inc = makeTransaction({ id: 'in1', accountId: 'aliceAcc', amountPence: 2000 });
+    const transfer = makeTransfer({
+      id: 'xfer1',
+      outgoingTransactionId: 'out1',
+      incomingTransactionId: 'in1',
+      status: 'suggested',
+      settlement: true,
+    });
+
+    const result = computeSplitBalances([alice, bob], [aliceAccount, bobAccount], [out, inc], [transfer]);
+    expect(result.every((p) => p.netOwedGbpPence === 0)).toBe(true);
+  });
+
+  it('ignores a confirmed transfer that is not marked as a settlement', () => {
+    const alice = makePerson({ id: 'alice' });
+    const bob = makePerson({ id: 'bob' });
+    const aliceAccount = makeAccount({ id: 'aliceAcc', owners: [{ personId: 'alice', sharePercent: 100 }] });
+    const bobAccount = makeAccount({ id: 'bobAcc', owners: [{ personId: 'bob', sharePercent: 100 }] });
+
+    const out = makeTransaction({ id: 'out1', accountId: 'bobAcc', amountPence: -2000, transferId: 'xfer1' });
+    const inc = makeTransaction({ id: 'in1', accountId: 'aliceAcc', amountPence: 2000, transferId: 'xfer1' });
+    const transfer = makeTransfer({ id: 'xfer1', outgoingTransactionId: 'out1', incomingTransactionId: 'in1' });
+
+    const result = computeSplitBalances([alice, bob], [aliceAccount, bobAccount], [out, inc], [transfer]);
+    expect(result.every((p) => p.netOwedGbpPence === 0)).toBe(true);
   });
 });
 

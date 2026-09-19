@@ -70,7 +70,7 @@ function PersonForm({ onCreated }: { onCreated: () => void }) {
 }
 
 export function HouseholdPage() {
-  const { persons, accounts, transactions, valuationSnapshots, refresh } = useAppStore();
+  const { persons, accounts, transactions, transfers, valuationSnapshots, refresh } = useAppStore();
   const activePersons = persons.filter((p) => !p.archived);
   const [period, setPeriod] = useState<Period>('this-month');
   const scheme = useColorScheme();
@@ -95,7 +95,10 @@ export function HouseholdPage() {
     [activePersons, accounts, transactions, start, end],
   );
 
-  const balances = useMemo(() => computeSplitBalances(activePersons, accounts, transactions), [activePersons, accounts, transactions]);
+  const balances = useMemo(
+    () => computeSplitBalances(activePersons, accounts, transactions, transfers),
+    [activePersons, accounts, transactions, transfers],
+  );
 
   const netWorthByPerson = useMemo(() => new Map(netWorth.perPerson.map((p) => [p.personId, p.netWorthGbpPence])), [netWorth]);
   const incomeExpenseByPerson = useMemo(() => new Map(incomeExpense.map((p) => [p.personId, p])), [incomeExpense]);
@@ -292,7 +295,7 @@ export function HouseholdPage() {
             {balances.every((b) => b.netOwedGbpPence === 0) ? (
               <EmptyState
                 title="Nothing owed"
-                description="Split a transaction on the Transactions page (e.g. a dinner one person paid for, or a refund that's partly someone else's) to see balances here."
+                description="Split a transaction on the Transactions page (e.g. a dinner one person paid for, or a refund that's partly someone else's) to see balances here. When someone pays a balance back, mark that transfer as a settlement on the Transactions page to clear it."
               />
             ) : (
               <ul className="person-list">

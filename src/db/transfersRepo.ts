@@ -34,6 +34,7 @@ export async function createSuggested(
     matchConfidence,
     createdAt: nowIso(),
     resolvedAt: null,
+    settlement: false,
   };
   const db = await getDb();
   await db.put('transfers', transfer);
@@ -52,6 +53,7 @@ export async function createManual(
     matchConfidence: 1,
     createdAt: nowIso(),
     resolvedAt: nowIso(),
+    settlement: false,
   };
   const db = await getDb();
   await db.put('transfers', transfer);
@@ -67,6 +69,15 @@ export async function confirm(transferId: string): Promise<void> {
   transfer.resolvedAt = nowIso();
   await db.put('transfers', transfer);
   await linkTransactions(transfer);
+}
+
+/** Marks (or unmarks) a confirmed/manual transfer as one household member settling up with another. */
+export async function setSettlement(transferId: string, settlement: boolean): Promise<void> {
+  const db = await getDb();
+  const transfer = await db.get('transfers', transferId);
+  if (!transfer) return;
+  transfer.settlement = settlement;
+  await db.put('transfers', transfer);
 }
 
 export async function reject(transferId: string): Promise<void> {

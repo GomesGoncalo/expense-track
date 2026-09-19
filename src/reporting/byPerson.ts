@@ -1,6 +1,6 @@
 import { buildBalanceSeries, bucketDate, computeLatestBalances, toGbpPence } from './netWorth';
 import type { NetWorthGranularity } from './netWorth';
-import type { Account, Person, Transaction, ValuationSnapshot } from '../domain/types';
+import type { Account, Person, Transaction, Transfer, ValuationSnapshot } from '../domain/types';
 
 export interface PersonNetWorth {
   personId: string;
@@ -190,10 +190,38 @@ export interface PersonBalance {
  * owed their share of it). Summed per person, the result is a net balance
  * — not a full pairwise settle-up (e.g. "Bob owes Alice £12 and Carol £8"),
  * just "Bob is £20 in the hole overall."
+ *
+ * A confirmed/manual transfer marked `settlement: true` (one household
+ * member paying another back, via Transactions' "Mark as settlement")
+ * feeds the same ledger: the payer's balance moves up by their share of
+ * the outgoing leg and the payee's moves down by their share of the
+ * incoming leg — the exact same "ownership-share of actual cash flow" math
+ * as a split transaction's account-owner side, just applied to both legs
+ * of the transfer instead of one transaction. If there was no prior debt,
+ * this naturally creates one in the other direction rather than needing
+ * special-cased "is there a debt to clear" logic.
  */
-export function computeSplitBalances(persons: Person[], accounts: Account[], transactions: Transaction[]): PersonBalance[] {
+export function computeSplitBalances(
+  persons: Person[],
+  accounts: Account[],
+  transactions: Transaction[],
+  transfers: Transfer[] = [],
+): PersonBalance[] {
   const accountsById = new Map(accounts.map((a) => [a.id, a]));
+  const transactionsById = new Map(transactions.map((t) => [t.id, t]));
   const totals = new Map<string, number>(persons.map((p) => [p.id, 0]));
+
+  function subtractOwnerShares(transactionId: string) {
+    const t = transactionsById.get(transactionId);
+    const account = t && accountsById.get(t.accountId);
+    if (!t || !account) return;
+    const gbpPence = toGbpPence(account, t.amountPence);
+    if (gbpPence === null) return;
+    for (const owner of account.owners) {
+      const actual = Math.round(gbpPence * (owner.sharePercent / 100));
+      totals.set(owner.personId, (totals.get(owner.personId) ?? 0) - actual);
+    }
+  }
 
   for (const t of transactions) {
     if (!t.splitOverride || t.transferId !== null) continue;
@@ -210,6 +238,13 @@ export function computeSplitBalances(persons: Person[], accounts: Account[], tra
       const fairShare = Math.round(gbpPence * (split.sharePercent / 100));
       totals.set(split.personId, (totals.get(split.personId) ?? 0) + fairShare);
     }
+  }
+
+  for (const transfer of transfers) {
+    if (!transfer.settlement) continue;
+    if (transfer.status !== 'confirmed' && transfer.status !== 'manual') continue;
+    subtractOwnerShares(transfer.outgoingTransactionId);
+    subtractOwnerShares(transfer.incomingTransactionId);
   }
 
   return Array.from(totals.entries()).map(([personId, netOwedGbpPence]) => ({ personId, netOwedGbpPence }));
